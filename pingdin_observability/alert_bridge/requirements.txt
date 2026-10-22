@@ -1,0 +1,7 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+# Upper bound: prometheus/alert_rules.yml and Grafana read this library's v7
+# default metric names (same pin as pingdin_platform's three services,
+# BUILD_LOG Journey 377 there).
+prometheus-fastapi-instrumentator>=7.0.0,<8.0.0

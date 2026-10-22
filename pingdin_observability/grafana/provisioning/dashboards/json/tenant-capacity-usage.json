@@ -1,0 +1,199 @@
+{
+  "title": "Pingdin — Tenant Capacity & Usage (counts only, Managed tenants)",
+  "uid": "pingdin-tenant-capacity",
+  "timezone": "Asia/Kolkata",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1h",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "tags": [
+    "pingdin",
+    "tenants"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "tenant",
+        "type": "textbox",
+        "label": "Tenant slug (blank = all)",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Latest measurement per tenant",
+      "description": "The newest row of core.tenant_usage for each tenant. Quotas and tiers are set and shown at /ops/tenants/<slug>/capacity (the read-only Grafana role cannot see tenant config).",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT DISTINCT ON (t.slug) t.slug AS tenant, round(u.storage_bytes / 1048576.0, 1) AS storage_mb, u.storage_objects AS files, u.edge_rows AS rows_held, u.messages_24h AS messages_24h, u.failed_24h AS failed_24h, u.dead_24h AS gave_up_24h, u.llm_requests AS ai_requests_today, u.llm_tokens AS ai_tokens_today, u.measured_at AS measured_at FROM core.tenant_usage u JOIN core.tenant t ON t.id = u.tenant_id WHERE ('$tenant' = '' OR t.slug = '$tenant') ORDER BY t.slug, u.day DESC"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Storage used (MB)",
+      "description": "Spaces bytes under each tenant's own prefix, from Edge's sweep (every few hours; the day's last measurement).",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT u.day::timestamptz AS time, t.slug AS metric, round(u.storage_bytes / 1048576.0, 1) AS \"storage_mb\" FROM core.tenant_usage u JOIN core.tenant t ON t.id = u.tenant_id WHERE u.day BETWEEN $__timeFrom()::date AND $__timeTo()::date AND ('$tenant' = '' OR t.slug = '$tenant') ORDER BY u.day"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "megabytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Rows held",
+      "description": "Rows the tenant holds across Edge's tenant tables (short-lived working tables excluded).",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT u.day::timestamptz AS time, t.slug AS metric, u.edge_rows AS \"edge_rows\" FROM core.tenant_usage u JOIN core.tenant t ON t.id = u.tenant_id WHERE u.day BETWEEN $__timeFrom()::date AND $__timeTo()::date AND ('$tenant' = '' OR t.slug = '$tenant') ORDER BY u.day"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Messages in the last 24 h",
+      "description": "Inbound messages Edge handled, per tenant, at the time of each measurement.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT u.day::timestamptz AS time, t.slug AS metric, u.messages_24h AS \"messages_24h\" FROM core.tenant_usage u JOIN core.tenant t ON t.id = u.tenant_id WHERE u.day BETWEEN $__timeFrom()::date AND $__timeTo()::date AND ('$tenant' = '' OR t.slug = '$tenant') ORDER BY u.day"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Failed and gave-up messages (24 h)",
+      "description": "failed_24h includes messages Pingdin gave up on after every retry (dead_24h). Anything above zero deserves a look at /ops/tenants/<slug>/messages.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT u.day::timestamptz AS time, t.slug AS metric, u.failed_24h AS \"failed_24h\" FROM core.tenant_usage u JOIN core.tenant t ON t.id = u.tenant_id WHERE u.day BETWEEN $__timeFrom()::date AND $__timeTo()::date AND ('$tenant' = '' OR t.slug = '$tenant') ORDER BY u.day"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "AI requests per day",
+      "description": "All AI calls for the tenant (core.usage_log), as of the day's last measurement.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 27
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT u.day::timestamptz AS time, t.slug AS metric, u.llm_requests AS \"llm_requests\" FROM core.tenant_usage u JOIN core.tenant t ON t.id = u.tenant_id WHERE u.day BETWEEN $__timeFrom()::date AND $__timeTo()::date AND ('$tenant' = '' OR t.slug = '$tenant') ORDER BY u.day"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "AI tokens per day",
+      "description": "Prompt plus completion tokens, as of the day's last measurement.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT u.day::timestamptz AS time, t.slug AS metric, u.llm_tokens AS \"llm_tokens\" FROM core.tenant_usage u JOIN core.tenant t ON t.id = u.tenant_id WHERE u.day BETWEEN $__timeFrom()::date AND $__timeTo()::date AND ('$tenant' = '' OR t.slug = '$tenant') ORDER BY u.day"
+        }
+      ]
+    }
+  ]
+}

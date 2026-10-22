@@ -1,0 +1,18 @@
+apiVersion: 1
+
+providers:
+  - name: pingdin
+    orgId: 1
+    folder: "Pingdin"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    # BUILD_LOG Journey 18 — the repo is the source of truth for these dashboards, so a changed file
+    # should always win over whatever the Grafana database holds. With `true`, Grafana can decline a
+    # changed file once a UI "Save" has moved the database version ahead of the file's `version`.
+    # With `false`, the UI cannot save a provisioned dashboard (edit the JSON, bump `version`, sync).
+    # NOTE: this was NOT the cause of the 3 Oct 2026 incident (that was a stale bind mount — see
+    # Journey 18 and scripts/ops_daily_check.sh check 5); it is hardening done while investigating it.
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

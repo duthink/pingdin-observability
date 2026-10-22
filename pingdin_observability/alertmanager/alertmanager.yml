@@ -1,0 +1,54 @@
+# alertmanager/alertmanager.yml — every alert routes to alert_bridge,
+# which is this repo's own small service (see alert_bridge/), NOT a
+# vendor integration. Kept deliberately dumb here: Alertmanager's job is
+# grouping/dedup/routing, not deciding HOW a human gets notified — that
+# decision (Telegram + OWNER_ALERT_WEBHOOK_URL, both, independently) is
+# alert_bridge's own job, same "two channels, neither blocks the other"
+# posture pingdin_platform's own capabilities/alerting/owner_alert.py
+# already uses (BUILD_LOG Journey 92).
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: alert-bridge
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # BUILD_LOG Journey 8 — the Watchdog heartbeat (prometheus/alert_rules.yml,
+    # always firing) on its own cadence: once at start, then once a day. The
+    # default route's 4h repeat would message the operator six times a day
+    # about something that is supposed to be true forever; the signal here is
+    # the message NOT arriving. Same receiver on purpose — a heartbeat that
+    # took a different path would not prove the real path works.
+    - matchers:
+        - alertname = "Watchdog"
+      receiver: alert-bridge
+      group_wait: 0s
+      group_interval: 24h
+      repeat_interval: 24h
+
+receivers:
+  - name: alert-bridge
+    webhook_configs:
+      - url: "http://pingdin-alert-bridge:8090/alertmanager"
+        send_resolved: true
+
+# BUILD_LOG Journey 8 — one root cause, one message. Every application-level
+# "down" alert below is an absent(up{job=...}) rule: when the main droplet (or
+# just its pingdin-alloy-edge relay, or the Tailscale link) dies, ALL of them
+# fire within the same minute — five separate Telegram messages for one
+# incident, since group_by alertname puts each in its own group. While
+# MainDropletHostDown is firing, its four absent()-based dependents are
+# suppressed. No `equal:` labels: these alerts share no label, and the
+# relationship is platform-wide, not per-instance. Postgres/Redis "down" rules
+# (`== 0`, no absent()) are deliberately not listed: they cannot fire when the
+# host is gone, and if one ever fires alongside a live host it is a real,
+# separate problem that must not be hidden.
+inhibit_rules:
+  - source_matchers:
+      - alertname = "MainDropletHostDown"
+    target_matchers:
+      - alertname =~ "PingdinEdgeDown|PingdinCoreDown|PingdinComputeDown"

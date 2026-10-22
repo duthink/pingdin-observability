@@ -1,0 +1,106 @@
+{
+  "title": "Pingdin — Platform Activity & Audit Trail (Managed tenants)",
+  "uid": "pingdin-audit-trail",
+  "timezone": "Asia/Kolkata",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "type": "textbox",
+        "label": "Tenant ID (blank = all)",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      },
+      {
+        "name": "subject_ref",
+        "type": "textbox",
+        "label": "Subject / resource_ref contains (blank = all)",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "core.audit_log — matching rows, newest first",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "Pingdin-DB (Managed tenants, read-only)"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT ts, trace_id, tenant_id, principal_id, action, resource_kind, resource_ref, outcome, subject_token, metadata FROM core.audit_log WHERE ts BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant_id' = '' OR tenant_id::text = '$tenant_id') AND ('$subject_ref' = '' OR resource_ref ILIKE '%' || '$subject_ref' || '%' OR subject_token ILIKE '%' || '$subject_ref' || '%') ORDER BY ts DESC LIMIT 500"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          },
+          "links": []
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View full trace in Tempo",
+                    "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22%7D%5D%7D"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "description": "This is a read-only view of the same hash-chained, append-only table core_service/audit.py writes to on every mutating action. Filter by tenant_id or a resource_ref/subject_token fragment. Click a trace_id to jump to its full distributed trace once edge/core/compute are OTel-instrumented (pingdin_platform Phase C) — until then this column still lets you correlate rows that share one request."
+    },
+    {
+      "type": "logs",
+      "title": "Matching container logs (all services, Loki)",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "expr": "{container=~\"pingdin-(edge|core|compute)\"} |~ \"(?i)$subject_ref\" !~ \"GET /(health|metrics) HTTP/1.1. 200\" !~ \"scheduler/poll-due.* 200 OK\""
+        }
+      ],
+      "description": "Container logs from edge, core and compute, filtered by the Subject box. Routine SUCCESSFUL lines are hidden by default — health checks and metrics scrapes that answered 200, and the scheduler's 15-second poll for due work — because they are roughly nine in ten lines and bury everything else. Failures (a 503 on /health, a 500 on a poll) and every other request still show. To see everything: Explore → Loki → {container=\"pingdin-edge\"}."
+    }
+  ]
+}

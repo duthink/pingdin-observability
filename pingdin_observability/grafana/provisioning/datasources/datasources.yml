@@ -1,0 +1,127 @@
+# grafana/provisioning/datasources/datasources.yml
+#
+# Four datasources, three signal types + one business-data view:
+#   1. Prometheus — metrics (infra + Tempo's own generated RED metrics)
+#   2. Loki       — logs, with a derived field that turns a trace_id
+#                    found in a log line into a clickable jump to Tempo
+#   3. Tempo      — traces, with tracesToLogs (jump to the matching Loki
+#                    lines) and serviceMap (jump to Prometheus)
+#   4. Pingdin-DB — READ-ONLY Postgres datasource, Managed tenants only,
+#                    "reshow exactly what happened" queries against
+#                    edge.raw_activity_log / core.audit_log directly.
+#                    Uses a dedicated least-privilege role
+#                    (pingdin_grafana_ro) provisioned on the MAIN
+#                    droplet's own DB — see
+#                    main-droplet-companion/provision_grafana_ro_role.sh
+#                    in this repo. Never used for Sovereign tenants —
+#                    their Edge DB is not reachable from here by design
+#                    (see SOVEREIGN_OBSERVABILITY.md).
+
+apiVersion: 1
+
+# REAL BUG FOUND LIVE: Grafana's file-based datasource provisioner only
+# updates an existing datasource in place if the file's own `version:`
+# is HIGHER than what's already stored (confirmed via Grafana's own
+# GitHub issue #79694 — "expected behavior," not a bug on their end
+# either). This file never set an explicit version, so every edit made
+# to the Pingdin-DB entry after its first (broken) creation was silently
+# ignored — the fix looked correct in the file, restarted cleanly, and
+# still failed, because Grafana never re-applied it. `deleteDatasources`
+# below forces a clean delete-then-recreate on this one entry, which
+# sidesteps version-gating entirely — the officially supported way to
+# force a provisioning file to actually take effect.
+#
+# CORRECTION, BUILD_LOG Journey 4: this comment used to claim "every
+# entry now also carries an explicit version" — false when checked
+# directly against the actual YAML below; only Pingdin-DB ever had one.
+# Prometheus/Loki/Tempo were silently exposed to the exact same
+# silent-ignore trap this comment describes for the whole time since —
+# any future edit to any of their own jsonData would have looked
+# correct in the file and been silently ignored on restart, same
+# failure mode, just never yet triggered because none of their own
+# configs had been edited since first creation. Fixed: all four
+# entries now carry an explicit `version:`, starting at 1 for the three
+# that never had one (Pingdin-DB's own version 3 is unchanged — it's
+# already past its own real edit history, no reason to reset it).
+# Bump the relevant entry's own number on any future edit to this
+# file, or the same silent-ignore trap recurs for whichever entry you
+# forgot.
+deleteDatasources:
+  - name: "Pingdin-DB (Managed tenants, read-only)"
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://pingdin-obs-prometheus:9090
+    isDefault: true
+    editable: false
+    version: 1
+    jsonData:
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://pingdin-obs-loki:3100
+    uid: loki
+    editable: false
+    version: 1
+    jsonData:
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: 'trace_id[=:]?\s*"?([a-f0-9]{32})"?'
+          name: trace_id
+          url: "$${__value.raw}"
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://pingdin-obs-tempo:3200
+    uid: tempo
+    editable: false
+    version: 1
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        filterByTraceID: true
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+
+  - name: Pingdin-DB (Managed tenants, read-only)
+    type: postgres
+    access: proxy
+    url: "${PINGDIN_DB_TAILSCALE_HOST}:5432"
+    user: pingdin_grafana_ro
+    database: pingdin
+    editable: false
+    version: 3
+    secureJsonData:
+      password: "${PINGDIN_GRAFANA_RO_PASSWORD}"
+    jsonData:
+      # REAL FINDING, CONFIRMED VIA GRAFANA'S OWN API RESPONSE (GET
+      # /api/datasources/name/...), not guessed a third time: this
+      # Grafana build's Postgres plugin identifies as
+      # "grafana-postgresql-datasource" — a newer, separately-versioned
+      # plugin, not the classic built-in "postgres" type the current
+      # public docs describe. The API response showed jsonData.database
+      # correctly set to "pingdin" (this file's own earlier fix DID
+      # write correctly) but a SEPARATE top-level `database` field on
+      # the same object was empty — and that's the field the query
+      # engine actually reads at runtime, not jsonData.database. Setting
+      # BOTH the top-level `database:` (above) and jsonData.database
+      # (here) covers whichever field the currently-running version
+      # actually honors, rather than betting on just one again.
+      database: pingdin
+      sslmode: disable  # Tailscale's own WireGuard tunnel is the transport encryption here, same posture alloy-edge already documents for its own OTLP/remote_write links
+      postgresVersion: 1600
+      maxOpenConns: 5
+      maxIdleConns: 2

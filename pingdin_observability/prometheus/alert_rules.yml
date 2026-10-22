@@ -1,0 +1,257 @@
+# prometheus/alert_rules.yml — starter rule set. Deliberately conservative
+# thresholds to start (tune against real baseline data after a week of
+# live traffic, not guessed numbers) — named here rather than pretending
+# these are final.
+
+groups:
+  - name: pingdin-infra
+    rules:
+      - alert: MainDropletHostDown
+        # fires if the main droplet's relayed node_exporter metrics stop
+        # arriving entirely — the single most important alert in this
+        # file, since every other rule below depends on data still
+        # flowing at all.
+        # `job="node"` is ONLY the main droplet's relayed exporter: this
+        # droplet's own is `obs-node` (prometheus.yml, BUILD_LOG Journey 7).
+        # Before that rename both used `node` and this alert could not fire
+        # when the whole main droplet died.
+        expr: absent(up{job="node"}) or (up{job="node"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Main droplet's node_exporter metrics have stopped arriving"
+          description: "No fresh node-level metrics from the main droplet in 2m. Either the droplet is down, pingdin-alloy-edge stopped forwarding, or the Tailscale link between droplets is broken."
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU usage above 90% for 10m on {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory usage above 90% for 10m on {{ $labels.instance }}"
+
+      # BUILD_LOG Journey 466 — the platform compose now sets a per-container
+      # mem_limit. A container nearing its own ceiling is OOM-killed (and
+      # restarted) long before the host-wide HighMemoryUsage fires. Limit 0
+      # means "unlimited", so those are excluded.
+      - alert: ContainerNearMemoryLimit
+        expr: |
+          container_memory_working_set_bytes{job="cadvisor",name=~"pingdin-.+"}
+            / (container_spec_memory_limit_bytes{job="cadvisor",name=~"pingdin-.+"} > 0) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} above 90% of its memory limit for 10m"
+
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 15
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space below 15% on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+
+      # BUILD_LOG Journey 9 — this droplet's own log and trace stores. Before
+      # this, nothing alerted if Loki or Tempo died (only the node/cAdvisor
+      # exporters were watched); the main droplet's Alloy would just retry
+      # forever and the gap would surface as missing data on a dashboard.
+      - alert: LokiDown
+        expr: absent(up{job="obs-loki"}) or (up{job="obs-loki"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Loki is not reporting metrics — container logs are not being stored"
+
+      - alert: TempoDown
+        expr: absent(up{job="obs-tempo"}) or (up{job="obs-tempo"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tempo is not reporting metrics — distributed traces are not being stored"
+
+  - name: pingdin-services
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pingdin-db is not responding to postgres_exporter"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pingdin-redis is not responding to redis_exporter"
+
+  - name: pingdin-app
+    # BUILD_LOG Journey 214 — direct instruction: "app-level alerting"
+    # was a real, named gap this whole file had until now — every
+    # rule above is infra-only. Real app-level signal only became
+    # possible once pingdin_platform's own shared/metrics.py (same
+    # Journey) mounted a genuine Prometheus /metrics endpoint on each
+    # of pingdin-edge/-core/-compute, scraped via alloy-edge's own
+    # config.alloy (same relay path node/postgres/redis already
+    # use) — before that, Prometheus had no direct signal about these
+    # three services at all, only Tempo's own trace data.
+    rules:
+      - alert: PingdinEdgeDown
+        expr: absent(up{job="pingdin-edge"}) or (up{job="pingdin-edge"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pingdin-edge is not reporting metrics — WhatsApp/Telegram message handling and every chat command are down"
+
+      - alert: PingdinCoreDown
+        expr: absent(up{job="pingdin-core"}) or (up{job="pingdin-core"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pingdin-core is not reporting metrics — role permits, tenant config, signals, and the scheduler are all unreachable"
+
+      - alert: PingdinComputeDown
+        expr: absent(up{job="pingdin-compute"}) or (up{job="pingdin-compute"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pingdin-compute is not reporting metrics — AI-backed features (chat, extraction, translation) are down"
+
+      - alert: PingdinHighErrorRate
+        # http_requests_total{status=...} is prometheus-fastapi-
+        # instrumentator's own default metric/label (shared/metrics.py's
+        # own docstring). BUILD_LOG Journey 238 — confirmed directly
+        # against that library's own upstream source and documentation
+        # (github.com/trallnag/prometheus-fastapi-instrumentator):
+        # Counter http_requests_total ships with handler/status/method
+        # labels by default, exactly matching the expression below.
+        # This is LIBRARY-SOURCE confirmation, not live-traffic
+        # confirmation — a genuinely different, weaker guarantee than
+        # actually watching this expression return real, non-empty
+        # data from a running pingdin-edge/-core/-compute under real
+        # traffic (DEPLOYMENT_RUNBOOK.md Part 5 step 4 is still the
+        # place that happens, and remains the real, final check —
+        # this comment only closes "is the label name even right,"
+        # not "does the whole scrape-to-alert path actually work").
+        # BUILD_LOG Journey 8 — reads the recorded series from recording_rules.yml
+        # (the same series the App Services dashboard's "5xx error ratio" panel
+        # plots), not a private copy of the query.
+        expr: job:http_error_ratio:rate5m > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is returning 5xx responses for more than 5% of requests over 5m"
+
+      - alert: PingdinHighRequestLatency
+        # BUILD_LOG Journey 7 — this rule read http_request_duration_seconds,
+        # the instrumentator's LOW-resolution histogram ("only a few buckets
+        # to keep cardinality low", per the library's own README). A
+        # histogram_quantile can never return more than the top FINITE bucket,
+        # so a 3s threshold on a histogram whose top bucket is far lower could
+        # never fire, however slow requests got. The library's second default,
+        # http_request_duration_highr_seconds (no labels, 20+ buckets), is the
+        # one that can express "p95 above 3s"; per-job is all this alert needs
+        # (per-handler detail lives on the App Services dashboard).
+        # BUILD_LOG Journey 8 — recorded in recording_rules.yml (the same series the
+        # App Services dashboard plots), not a private copy of the query.
+        # BUILD_LOG Journey 22 — three slow test messages made p95 jump to the next histogram bucket (10s, then 30s) and fired this for
+        # nothing, twice an hour. Now: p95 above 20s AND real traffic (more than 6 requests a minute) for 20m. Both names are recorded series
+        # (recording_rules.yml). "Something is broken" is PingdinHighErrorRate's job, not this one's.
+        expr: job:http_request_duration_highr_seconds:p95_5m > 20 and on (job) job:http_requests:rate5m > 0.1
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }}'s own p95 request latency has been above 20s for 20m under real traffic"
+
+      - alert: PingdinMetricsMiddlewareBypassed
+        # BUILD_LOG (pingdin_platform) Journey 383. shared/asgi_guard.py lets a
+        # request through when the metrics middleware fails before reaching the
+        # app — users are served, but those requests are NOT measured, so
+        # PingdinHighErrorRate cannot see errors on them either. This counter
+        # is the only signal that the blind spot exists (it was a live incident
+        # on 2026-09-30: a FastAPI/instrumentator version pair that crashed on
+        # every include_router route).
+        expr: increase(pingdin_metrics_middleware_bypassed_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} is serving requests WITHOUT metrics (middleware bypassed: {{ $labels.error }}) — error/latency alerts are blind for them"
+
+  - name: pingdin-meta
+    # BUILD_LOG Journey 8 — alerting watching itself. Both rules deliver
+    # THROUGH the pipeline they watch, so each carries an honest note about
+    # what it can and cannot tell you.
+    rules:
+      - alert: Watchdog
+        # Always firing, by design (the standard Prometheus dead-man's-switch
+        # pattern). alertmanager.yml routes it on its own 24h cadence; the
+        # signal is its ABSENCE: a day without this message means Prometheus
+        # rule evaluation, Alertmanager, or alert_bridge stopped working —
+        # exactly the failures that cannot page you about themselves.
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "Alerting pipeline heartbeat"
+
+      - alert: AlertBridgeDown
+        expr: absent(up{job="alert-bridge"}) or (up{job="alert-bridge"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "pingdin-alert-bridge is not reporting metrics — Telegram delivery of EVERY alert may be down"
+          description: "This alert is itself delivered by alert_bridge, so if the bridge is really down you will not receive this message. The Watchdog heartbeat stopping, or http://<obs-tailscale-ip>:9090/alerts, is how you would find out."
+
+  - name: pingdin-public
+    # BUILD_LOG Journey 15 — the outside view (prometheus.yml `blackbox-public`).
+    rules:
+      - alert: PublicEndpointDown
+        expr: probe_success{job="blackbox-public"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} is failing its outside probe — customers may not be able to reach it"
+          description: "Probed every minute from the OBSERVABILITY droplet over the public internet: DNS, TLS, Caddy and the service behind it. Independent of the main droplet's own metrics relay, so it can fire when every internal check is green — and it is deliberately NOT suppressed by MainDropletHostDown, because that would hide a customer-facing outage behind a relay problem. If the host really is down you get both messages."
+
+      - alert: PublicCertExpiringSoon
+        # `$value` is the seconds remaining (left operand of `and`). The `> 0` guard
+        # keeps a probe that never reached TLS from reading as "expired in 1970".
+        # Caddy renews about 30 days before expiry, so under 14 days left means
+        # renewal has been failing for ~two weeks.
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-public"} - time()) < 14 * 86400 and probe_ssl_earliest_cert_expiry{job="blackbox-public"} > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS certificate for {{ $labels.instance }} expires in {{ $value | humanizeDuration }}"
+
+      - alert: BlackboxExporterDown
+        expr: absent(up{job="obs-blackbox"}) or (up{job="obs-blackbox"} == 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The outside-probe exporter is not reporting — the public site is currently NOT being watched from outside"
+

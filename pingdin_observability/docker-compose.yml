@@ -1,0 +1,254 @@
+# pingdin_observability/docker-compose.yml
+#
+# Runs on its OWN, separate droplet — never the main pingdin_platform
+# droplet. Receives metrics (remote_write), logs (Loki push), and
+# traces (OTLP) from the main droplet's own pingdin-alloy-edge, which
+# already targets this exact shape (pingdin_platform's own
+# alloy-edge/config.alloy, BUILD_LOG Journey 46 — unchanged by this
+# repo).
+#
+# SECURITY POSTURE: every ingestion port (Prometheus remote-write,
+# Loki push, Tempo OTLP) is bound to this droplet's OWN Tailscale
+# interface IP (${TAILSCALE_IP}, captured by scripts/01_tailscale_setup.sh
+# into .env), never 0.0.0.0 — nothing here is reachable from the public
+# internet, only from other machines on the same tailnet. Grafana's own
+# UI is bound to 127.0.0.1 only, reached via `tailscale serve` (same
+# convention pingdin_platform's own Directus already uses) or an SSH
+# tunnel before Tailscale is set up.
+
+services:
+  pingdin-obs-prometheus:
+    image: prom/prometheus:latest
+    container_name: pingdin-obs-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ./prometheus/recording_rules.yml:/etc/prometheus/recording_rules.yml:ro
+      - pingdin-obs-prometheus-data:/prometheus
+    ports:
+      - "${TAILSCALE_IP}:9090:9090"
+    networks:
+      - pingdin-observability-net
+    # BUILD_LOG Journey 8 — this file had NO healthchecks at all, so
+    # `docker compose ps` could not show any service unhealthy and nothing
+    # could wait for a backend to be ready (depends_on below only ever waited
+    # for a container to START). Each check hits the service's own documented
+    # health endpoint on ITS OWN loopback (independent of the Tailscale-IP
+    # host bindings). `wget` is the busybox tool these Prometheus-ecosystem
+    # images bundle; every path/command here is the widely-used public
+    # pattern for that image, confirmed by research, NOT run live from this pass.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  pingdin-obs-alertmanager:
+    image: prom/alertmanager:latest
+    container_name: pingdin-obs-alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - pingdin-obs-alertmanager-data:/alertmanager
+    networks:
+      - pingdin-observability-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # No host port — only Prometheus and alert_bridge reach this over
+    # the internal network. Nothing outside this compose project needs
+    # direct access to Alertmanager's own UI/API.
+
+  pingdin-alert-bridge:
+    build: ./alert_bridge
+    container_name: pingdin-alert-bridge
+    restart: unless-stopped
+    environment:
+      ALERT_BRIDGE_TELEGRAM_BOT_TOKEN: ${ALERT_BRIDGE_TELEGRAM_BOT_TOKEN}
+      ALERT_BRIDGE_TELEGRAM_CHAT_ID: ${ALERT_BRIDGE_TELEGRAM_CHAT_ID}
+      # Must match OWNER_ALERT_WEBHOOK_TOKEN set on the MAIN droplet's
+      # own .env for pingdin-edge/pingdin-core — see
+      # main-droplet-companion/README.md.
+      OWNER_ALERT_WEBHOOK_TOKEN: ${OWNER_ALERT_WEBHOOK_TOKEN}
+    networks:
+      - pingdin-observability-net
+    healthcheck:
+      # Same python3/urllib idiom pingdin_platform's edge/core/compute use
+      # (python:3.12-slim ships no curl/wget).
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    ports:
+      # Reachable from the main droplet's Edge/Core containers (owner_alert.py's
+      # own outbound POST to OWNER_ALERT_WEBHOOK_URL) — Tailscale-bound,
+      # same posture as the ingestion ports above.
+      - "${TAILSCALE_IP}:8090:8090"
+
+  pingdin-obs-loki:
+    image: grafana/loki:latest
+    container_name: pingdin-obs-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - pingdin-obs-loki-data:/loki
+    ports:
+      - "${TAILSCALE_IP}:3100:3100"
+    networks:
+      - pingdin-observability-net
+    # No Docker healthcheck, ON PURPOSE (BUILD_LOG Journey 9): Journey 8's
+    # `wget` check reported this container `unhealthy` on the real server while
+    # Loki was demonstrably serving (its API answered, Alloy was delivering).
+    # Its health is watched instead through Prometheus's own scrape of its
+    # /metrics (`obs-loki` job, LokiDown alert) — independent of what tools the
+    # image happens to ship.
+
+  pingdin-obs-tempo:
+    image: grafana/tempo:latest
+    container_name: pingdin-obs-tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - pingdin-obs-tempo-data:/var/tempo
+    ports:
+      - "${TAILSCALE_IP}:4317:4317"  # OTLP grpc — edge/core/compute
+      - "${TAILSCALE_IP}:4318:4318"  # OTLP http
+    networks:
+      - pingdin-observability-net
+    # No Docker healthcheck, ON PURPOSE — same reason as Loki above; watched via
+    # the `obs-tempo` scrape job and TempoDown alert.
+    depends_on:
+      # metrics_generator remote_writes to Prometheus. service_started (the
+      # pre-Journey-8 behaviour), deliberately NOT service_healthy: see the
+      # gating note on Grafana's depends_on below.
+      pingdin-obs-prometheus:
+        condition: service_started
+
+  pingdin-obs-grafana:
+    # Pinned, not `:latest` — REAL BUG FOUND LIVE: Grafana 12.2.0
+    # introduced a confirmed regression (upstream issue #112418,
+    # labeled type/regression) where Postgres datasources fail every
+    # query with "You do not currently have a default database
+    # configured," even when the datasource's own stored config is
+    # provably correct (confirmed via this repo's own direct
+    # GET /api/datasources/name/... check — jsonData.database AND the
+    # top-level database field both showed "pingdin" correctly, and the
+    # query still failed identically). `:latest` floated onto an
+    # affected build; no confirmed fixed version number was findable at
+    # the time of this fix, so pinning to 12.1.1 — the exact version the
+    # original bug report itself confirms works — rather than gambling
+    # on whether a later `:latest` pull actually includes a fix.
+    image: grafana/grafana:12.1.1
+    container_name: pingdin-obs-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL}
+      # Read by grafana/provisioning/datasources/datasources.yml's own
+      # ${PINGDIN_DB_TAILSCALE_HOST}/${PINGDIN_GRAFANA_RO_PASSWORD}
+      # interpolation — Grafana's file provisioner expands env vars in
+      # datasource YAML natively, no separate templating step needed.
+      PINGDIN_DB_TAILSCALE_HOST: ${PINGDIN_DB_TAILSCALE_HOST}
+      PINGDIN_GRAFANA_RO_PASSWORD: ${PINGDIN_GRAFANA_RO_PASSWORD}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - pingdin-obs-grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - pingdin-observability-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      # Only Prometheus gates Grafana, and only at start-up: its check is
+      # CONFIRMED LIVE (`healthy` on the real server, BUILD_LOG Journey 9).
+      # Loki and Tempo stay start-order (`service_started`) PERMANENTLY, not
+      # pending: Grafana must still come up when they are down, because that is
+      # exactly when you want it to look at Prometheus and the alerts.
+      pingdin-obs-prometheus:
+        condition: service_healthy
+      pingdin-obs-loki:
+        condition: service_started
+      pingdin-obs-tempo:
+        condition: service_started
+
+  # ── Self-monitoring: this droplet watching its own health ──────────
+  pingdin-obs-node-exporter:
+    image: prom/node-exporter:latest
+    container_name: pingdin-obs-node-exporter
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    networks:
+      - pingdin-observability-net
+
+  pingdin-obs-cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: pingdin-obs-cadvisor
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    networks:
+      - pingdin-observability-net
+
+  # BUILD_LOG Journey 15 — the OUTSIDE view. Probes the public URLs listed in
+  # prometheus.yml's `blackbox-public` job from this droplet over the public
+  # internet. No published port (only Prometheus, on the internal network, talks
+  # to it), no Docker healthcheck (same reasoning as Loki/Tempo, Journey 9):
+  # Prometheus scrapes its own /metrics (`obs-blackbox`) and BlackboxExporterDown
+  # alerts on it — independent of what tools the image ships. Floating tag like
+  # its siblings; scripts/pin_image_digests.py freezes it with the rest.
+  pingdin-obs-blackbox:
+    image: prom/blackbox-exporter:latest
+    container_name: pingdin-obs-blackbox
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks:
+      - pingdin-observability-net
+
+networks:
+  pingdin-observability-net:
+    driver: bridge
+
+volumes:
+  pingdin-obs-prometheus-data:
+  pingdin-obs-alertmanager-data:
+  pingdin-obs-loki-data:
+  pingdin-obs-tempo-data:
+  pingdin-obs-grafana-data:

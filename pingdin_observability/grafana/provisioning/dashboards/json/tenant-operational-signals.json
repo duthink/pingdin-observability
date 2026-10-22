@@ -1,0 +1,51 @@
+{
+  "title": "Pingdin — Tenant Operational Signals (de-identified, all tiers)",
+  "uid": "pingdin-operational-signals",
+  "timezone": "Asia/Kolkata",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "type": "textbox",
+        "label": "Tenant ID (blank = all)",
+        "query": "",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Activity volume, trailing 7-day window (core.signal_ledger, tenant_operational_volume)",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "Pingdin-DB (Managed tenants, read-only)" },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT computed_at AS time, tenant_id::text AS metric, (value->>'activity_count')::numeric AS \"activity_count\" FROM core.signal_ledger WHERE signal_key = 'tenant_operational_volume' AND subject_token IS NULL AND computed_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant_id' = '' OR tenant_id::text = '$tenant_id') ORDER BY computed_at"
+        }
+      ],
+      "description": "One line per tenant. subject_token IS NULL is what makes this a tenant/agent-level aggregate (migration core/091) rather than a per-person row -- this panel can never show which specific person generated any of this activity, only the tenant's own trailing-7-day count. Computed nightly by capabilities/signals/operational.py, same cron slot as every other production signal."
+    },
+    {
+      "type": "table",
+      "title": "Latest reading per tenant",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "postgres", "uid": "Pingdin-DB (Managed tenants, read-only)" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT DISTINCT ON (sl.tenant_id) t.name AS tenant_name, sl.tenant_id, sl.agent_key, (sl.value->>'activity_count')::int AS activity_count, (sl.value->>'message_count')::int AS message_count, (sl.value->>'active_subject_count')::int AS active_subject_count, sl.computed_at FROM core.signal_ledger sl JOIN core.tenant t ON t.id = sl.tenant_id WHERE sl.signal_key = 'tenant_operational_volume' AND sl.subject_token IS NULL AND ('$tenant_id' = '' OR sl.tenant_id::text = '$tenant_id') ORDER BY sl.tenant_id, sl.computed_at DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "filterable": true } }
+      },
+      "description": "One row per tenant, most recent computed_at only -- a quick 'is anyone gone quiet' scan. A tenant that stops appearing here (or whose activity_count drops to zero) is exactly the signal this dashboard exists to surface, without ever showing what any individual message said or who sent it."
+    }
+  ]
+}

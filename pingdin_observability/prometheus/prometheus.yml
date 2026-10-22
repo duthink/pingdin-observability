@@ -1,0 +1,125 @@
+# prometheus/prometheus.yml — receives remote_write from the MAIN
+# droplet's pingdin-alloy-edge (config.alloy already POSTs to
+# http://<this-host>:9090/api/v1/write, unchanged since pingdin_platform
+# BUILD_LOG Journey 46) and self-monitors this droplet's own containers.
+#
+# --web.enable-remote-write-receiver is set on the container command in
+# docker-compose.yml — required for the /api/v1/write endpoint to exist
+# at all; without that flag this file alone does nothing.
+#
+# REAL BUG FOUND LIVE (BUILD_LOG Journey 4, cross-repo audit from
+# pingdin_platform's own side): the alertmanagers target below read
+# "pingdin-alertmanager:9093" — that container doesn't exist under that
+# name. docker-compose.yml's own container_name for this service is
+# "pingdin-obs-alertmanager" (every OTHER hostname in this repo's own
+# configs already gets this right — grafana/provisioning/datasources.yml,
+# tempo.yaml, alertmanager.yml's own webhook target — this was the one
+# place it didn't). Docker's internal DNS only resolves the real
+# container_name, so Prometheus could never actually reach Alertmanager
+# under the wrong name — every rule in alert_rules.yml would fire
+# INSIDE Prometheus's own alerting engine and then silently go nowhere,
+# never reaching alert_bridge, never reaching Telegram. Confirmed by
+# grepping every container_name in docker-compose.yml directly, not
+# assumed from the service's own YAML key name (which happens to match
+# here, but isn't guaranteed to in general — always check
+# container_name specifically).
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    origin: pingdin-observability
+
+rule_files:
+  - /etc/prometheus/recording_rules.yml
+  - /etc/prometheus/alert_rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - pingdin-obs-alertmanager:9093
+
+scrape_configs:
+  # This droplet watching itself — "who watches the watchmen." Same
+  # exporters/images as the main droplet, scraped locally instead of
+  # relayed, since there's no second hop needed for a box monitoring
+  # its own containers.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # BUILD_LOG Journey 7 — REAL, live-confirmed bug: these two jobs used to
+  # be named `node` and `cadvisor`, the SAME job names the main droplet's
+  # pingdin-alloy-edge relays (alloy-edge/config.alloy). `up{job="node"}`
+  # returned two series (main + this droplet), so MainDropletHostDown's
+  # `absent(up{job="node"})` could never be true while THIS droplet was alive
+  # — the alert meant to catch the main droplet dying was masked by this
+  # droplet's own exporter. Every locally-scraped job is prefixed `obs-` so no
+  # alert or dashboard selecting a relayed job (`job="node"`) can ever match
+  # this droplet; tests/test_config_consistency.py fails the build if any
+  # alert rule or dashboard selector matches a local job name. Series history
+  # under the old names stays in Prometheus until retention expires it.
+  - job_name: obs-node
+    static_configs:
+      - targets: ["pingdin-obs-node-exporter:9100"]
+
+  - job_name: obs-cadvisor
+    static_configs:
+      - targets: ["pingdin-obs-cadvisor:8080"]
+
+  # BUILD_LOG Journey 8 — "who watches the watchmen", the missing half: every
+  # alert (Alertmanager AND platform owner-alerts) is delivered by
+  # pingdin-alert-bridge, and nothing monitored it — if it died, every alert
+  # channel went silent with no signal at all. Scraped locally (same compose
+  # network, no Alloy relay). Job name has no `pingdin-` prefix and is not
+  # `node`/`cadvisor`, so no relayed-job selector can match it.
+  - job_name: alert-bridge
+    static_configs:
+      - targets: ["pingdin-alert-bridge:8090"]
+
+  # BUILD_LOG Journey 9 — Loki and Tempo watched through their own /metrics
+  # (both serve it on their HTTP port) instead of a Docker healthcheck, which
+  # reported both `unhealthy` on the real server while they were serving. `obs-`
+  # prefix: local jobs never share a name with a relayed one (Journey 7).
+  - job_name: obs-loki
+    static_configs:
+      - targets: ["pingdin-obs-loki:3100"]
+
+  - job_name: obs-tempo
+    static_configs:
+      - targets: ["pingdin-obs-tempo:3200"]
+
+  # BUILD_LOG Journey 15 — the exporter that makes the outside probe, watched like
+  # every other local service (BlackboxExporterDown).
+  - job_name: obs-blackbox
+    static_configs:
+      - targets: ["pingdin-obs-blackbox:9115"]
+
+  # BUILD_LOG Journey 15 — THE OUTSIDE VIEW. Every other job here looks at the main
+  # droplet from inside (its exporters, relayed by Alloy); none can see Caddy, DNS or
+  # the TLS certificate fail while the services behind them are healthy. These probes
+  # run from THIS droplet over the public internet, once a minute (not the global
+  # interval — these are real requests to production).
+  #   app.pingd.in/health          Caddy allowlist -> Edge  (dashboards, Growth consent links, and, since pingdin_platform Journey 484,
+  #                                the WhatsApp / Telegram intake itself: n8n and gateway.pingd.in are gone)
+  # It is a real public route in pingdin_platform's caddy/Caddyfile; its
+  # tests/test_observability_probe_contract.py fails if it stops being one.
+  # To watch another public URL, add it to `targets` (any https:// URL that answers
+  # 2xx to a GET). Job name has no `pingdin-` prefix and is not a relayed name.
+  - job_name: blackbox-public
+    metrics_path: /probe
+    scrape_interval: 60s
+    scrape_timeout: 15s
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://app.pingd.in/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: pingdin-obs-blackbox:9115

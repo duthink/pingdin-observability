@@ -1,0 +1,74 @@
+# tempo/tempo.yaml — receives OTLP directly (grpc:4317, http:4318) from
+# the main droplet's pingdin-alloy-edge, which already exports here
+# (config.alloy's otelcol.exporter.otlp "gateway" block, BUILD_LOG
+# Journey 46 — unchanged, this file is just finally giving that export
+# a real destination). No separate collector needed in front of Tempo —
+# it accepts OTLP natively.
+#
+# Real senders, as of pingdin_platform's own BUILD_LOG Journey 132
+# (Phase C): edge_service/core_service/compute_service export real
+# spans via shared/otel.py's configure_tracing()/instrument_app(). (n8n
+# also exported until pingdin_platform Journey 484 removed it.) Confirmed
+# working end-to-end (a real 48-span trace connecting pingdin-n8n →
+# pingdin-edge, and separately pingdin-edge → pingdin-core for the
+# scheduler poll loop — that Journey's own addendum 2 has the full
+# verification). Corrected here (BUILD_LOG Journey 214) — this
+# comment previously claimed edge/core/compute "send nothing yet,"
+# true when Journey 1 first wrote it, stale since Phase C shipped on
+# the platform side; nothing in THIS repo needed to change for that
+# to become true, only this file's own account of it needed updating.
+#
+# Retention: 14 days — traces are the most storage-expensive of the
+# three signal types per unit time; shorter window than metrics/logs
+# deliberately, tune after real volume is observed.
+#
+# REAL BUG FOUND LIVE (Hobo's own droplet, first bring-up): this file
+# was written against Tempo 2.x's config schema. Tempo 3.0 (GA'd after
+# this repo's own knowledge cutoff — confirmed via Tempo's own release
+# notes and migration guide, not guessed) removed the `ingester:` and
+# `compactor:` blocks entirely. Monolithic mode (what this deployment
+# is — single binary, no Kafka) doesn't need a replacement block either:
+# per Tempo's own current docs, compaction now runs in-process
+# automatically using defaults. The one real setting that block used to
+# carry — block_retention — moved to overrides.defaults.compaction
+# below, which is where it now lives.
+
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+
+metrics_generator:
+  # Derives RED metrics (request rate/errors/duration) directly from
+  # spans, pushed into this same Prometheus via remote_write — genuinely
+  # useful once edge/core/compute are instrumented (Phase C), harmless
+  # and cheap.
+  storage:
+    path: /var/tempo/generator-wal
+    remote_write:
+      - url: http://pingdin-obs-prometheus:9090/api/v1/write
+        send_exemplars: true
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics]
+    compaction:
+      # This is the 3.0 home for what compactor.compaction.block_retention
+      # used to configure in 2.x — same 14-day value, new location.
+      block_retention: 336h  # 14 days

@@ -1,0 +1,40 @@
+# prometheus/recording_rules.yml — BUILD_LOG Journey 8.
+#
+# THE single definition of each app-level aggregate that BOTH an alert rule
+# (alert_rules.yml) and a Grafana panel (pingdin-app-services.json) read.
+# Before this file, PingdinHighErrorRate / PingdinHighRequestLatency and their
+# dashboard panels each carried their own copy of the same rate()/
+# histogram_quantile() expression — two copies that can drift apart (a
+# dashboard showing a number the alert does not actually use), each
+# recomputed from raw buckets on every evaluation and every dashboard load.
+# Now: computed once per evaluation interval here, stored, and read by name.
+# tests/test_config_consistency.py fails the build if an alert or panel goes
+# back to a raw copy, or references a name this file does not define (a typo
+# in a recorded-series name would make an alert silently never fire).
+#
+# Naming: level:metric:operations (Prometheus's own recording-rule convention).
+# The job selector below is the ONE place the three application services are
+# named for these aggregates.
+
+groups:
+  - name: pingdin-app-recording
+    rules:
+      - record: job:http_requests:rate5m
+        expr: sum by (job) (rate(http_requests_total{job=~"pingdin-edge|pingdin-core|pingdin-compute"}[5m]))
+
+      - record: job:http_requests_5xx:rate5m
+        expr: sum by (job) (rate(http_requests_total{job=~"pingdin-edge|pingdin-core|pingdin-compute", status=~"5.."}[5m]))
+
+      # Zero-filled on purpose: with no 5xx series at all the numerator above
+      # is EMPTY, so a plain division returns nothing — a dashboard would show
+      # a blank panel for "no errors" and "no traffic" alike. `or (… * 0)`
+      # adds an explicit 0 for every job that has traffic but no 5xx, so blank
+      # now genuinely means "no traffic in the window".
+      - record: job:http_error_ratio:rate5m
+        expr: (job:http_requests_5xx:rate5m or (job:http_requests:rate5m * 0)) / job:http_requests:rate5m
+
+      # highr = the instrumentator's high-resolution histogram (20+ buckets,
+      # reaches past 3s); the low-resolution one cannot express a 3s threshold
+      # (Journey 7). Per-job only — per-handler detail is a dashboard concern.
+      - record: job:http_request_duration_highr_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_highr_seconds_bucket{job=~"pingdin-edge|pingdin-core|pingdin-compute"}[5m])))

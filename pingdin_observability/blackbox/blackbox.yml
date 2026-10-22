@@ -1,0 +1,32 @@
+# blackbox/blackbox.yml — BUILD_LOG Journey 15.
+#
+# What the outside probe (prometheus.yml `blackbox-public`) asks for. One module,
+# because both targets want the same thing: a real HTTPS GET that succeeds.
+#
+# Why this exists: every other check in this repo looks at the main droplet from
+# INSIDE — its own exporters, relayed over Tailscale by Alloy. None of them can
+# see Caddy, DNS or the TLS certificate failing while the services behind them
+# are individually healthy. This module makes THIS droplet (a different machine
+# and network path) do what a customer's phone does: resolve the name, complete
+# the TLS handshake, and get a 2xx.
+modules:
+  http_2xx:
+    prober: http
+    # Must stay below prometheus.yml's blackbox-public scrape_timeout (15s) — a
+    # test enforces it — or Prometheus gives up on the scrape before the prober
+    # has finished reporting the failure.
+    timeout: 10s
+    http:
+      method: GET
+      # A redirect that lands on a 2xx is fine; one that lands on an error is not.
+      follow_redirects: true
+      # An https:// target that is served over plain http must FAIL, not pass.
+      fail_if_not_ssl: true
+      # TLS is verified (never insecure_skip_verify): an expired, mismatched or
+      # untrusted certificate is exactly what this probe is here to catch.
+      tls_config:
+        insecure_skip_verify: false
+      # The obs droplet may not have working IPv6; prefer v4 but fall back.
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: true
+      # valid_status_codes left at the default: any 2xx.
