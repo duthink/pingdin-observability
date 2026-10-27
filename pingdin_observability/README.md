@@ -73,11 +73,11 @@ On the laptop it is `pingd.in_agent_platform/pingdin_observability-repo/` (the g
 git add -A && git commit -m "Obs journey <N>, as deployed" && git push origin master
 ```
 
-Download the tarball into `pingd.in_agent_platform/` (the folder above both repositories), then unpack it from inside the repository, guarded so it stops if the `.git` is missing:
+Download the tarball into `pingd.in_agent_platform/` (the folder above both repositories) and unpack it with the replace script, which keeps the `.git`:
 
 ```bash
-cd ~/clients/pingd.in/pingd.in_agent_platform/pingdin_observability-repo
-ls -d .git && tar xzf ../pingdin_observability_journey_<N>.tar.gz
+cd ~/clients/pingd.in/pingd.in_agent_platform
+bash replace_repo.sh pingdin_observability-repo        # newest pingdin_observability*.tar.gz in that folder
 ```
 
-Never extract it in the parent folder and never delete or replace `pingdin_observability-repo/` first: the `.git` is in that folder, one level above this one, and a replaced folder takes it along (27 Oct 2026). Extracting never deletes a file a journey removed; each BUILD_LOG "Deployment" lists the `rm`. To recover a lost `.git`: `git clone https://github.com/duthink/pingdin-observability.git ~/clone && mv ~/clone/.git . && rm -rf ~/clone`, then `git status -sb` shows only the new journey's changes. This repository has no GitHub Actions workflow; its tests run in the deploy (`scripts/sync_to_server.sh --deploy`). The long documents are in `docs/`.
+The script is saved once in `pingd.in_agent_platform/`, outside both repositories (the copy to restore it from is `pingdin_platform/docs/replace_repo.sh` in the platform repository; its behaviour is in the platform's `docs/ROUTINE_CHECKS.md`). It unpacks to a temporary place first, replaces this repository's files (a clean replace: a file a journey removed disappears and `git status` shows it as deleted), puts the `.git` back and shows `git status`, which must list only that journey's changes. It never commits or pushes. Never delete or replace `pingdin_observability-repo/` by hand: the `.git` is in that folder, one level above this one, and a replaced folder takes it along (27 Oct 2026). To recover a lost `.git`: `git clone https://github.com/duthink/pingdin-observability.git ~/clone && mv ~/clone/.git pingdin_observability-repo/ && rm -rf ~/clone`. This repository has no GitHub Actions workflow; its tests run in the deploy (`scripts/sync_to_server.sh --deploy`). The long documents are in `docs/`.

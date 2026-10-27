@@ -1787,3 +1787,21 @@ Documents only; nothing on the droplet changes.
 
 ### What to check — Journey 28
 `sed -n 1,5p pingdin_observability/README.md` still reads normally; `git log --oneline -1` shows the new commit and GitHub shows it.
+
+
+## Journey 29 — unpacking with `replace_repo.sh` (27 Oct 2026)
+
+Direct request (27 Oct 2026): keep the documents in step with the new unpack procedure (platform Journey 537).
+
+**Changed.** `README.md` "This repository": the unpack step is now `bash replace_repo.sh pingdin_observability-repo` (a script kept in `pingd.in_agent_platform/`, outside both repositories), replacing the hand-written `tar xzf` and the guard line; the recovery of a lost `.git` and the note that this repository has no GitHub Actions workflow stay.
+
+### Verification — Journey 29
+The documents' tests pass (the eight test files).
+
+### Deployment — Journey 29
+Documents only; nothing on the droplet changes.
+1. **Laptop** (after saving `replace_repo.sh` once, see platform Journey 537): `cd ~/clients/pingd.in/pingd.in_agent_platform && bash replace_repo.sh pingdin_observability-repo` → `.git kept`, `git status` lists only `README.md` and `docs/BUILD_LOG.md`.
+2. **Laptop wrap-up** (no deploy, no sync): `git add -A && git commit -m "Obs journey 29: unpack with replace_repo.sh" && git push origin master`; `git status -sb | head -1` shows `## master...origin/master`.
+
+### What to check — Journey 29
+`git log --oneline -1` shows the commit on GitHub.
