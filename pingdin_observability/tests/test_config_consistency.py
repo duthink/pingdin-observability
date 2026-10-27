@@ -36,6 +36,14 @@ import re
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
+
+# BUILD_LOG Journey 27 — the four long documents live in docs/; README.md stays at the top of the repository.
+_DOCS_DIR_FILES = ("DEPLOYMENT_RUNBOOK.md", "ROUTINE_CHECKS.md", "SOVEREIGN_OBSERVABILITY.md", "BUILD_LOG.md")
+
+
+def _doc_path(fn):
+    return os.path.join(_ROOT, "docs", fn) if fn in _DOCS_DIR_FILES else os.path.join(_ROOT, fn)
+
 def _yaml(rel):
     try:
         import yaml
@@ -347,7 +355,7 @@ def test_live_docs_never_tell_the_operator_to_print_env_values():
     offenders = []
     for fn in ("README.md", "DEPLOYMENT_RUNBOOK.md", "SOVEREIGN_OBSERVABILITY.md", "ROUTINE_CHECKS.md",
                os.path.join("scripts", "README.md"), os.path.join("main-droplet-companion", "README.md")):
-        path = os.path.join(_ROOT, fn)
+        path = _doc_path(fn)
         if not os.path.exists(path):
             continue
         for n, line in enumerate(open(path, encoding="utf-8"), 1):
@@ -364,7 +372,7 @@ def test_every_alert_is_documented_in_the_routine_checks_alert_table():
     outside-probe section) a missing table row would go unnoticed — so the check reads
     the first cell of every row of the "When an alert arrives" table."""
     import re
-    doc = open(os.path.join(_ROOT, "ROUTINE_CHECKS.md"), encoding="utf-8").read()
+    doc = open(os.path.join(_ROOT, "docs", "ROUTINE_CHECKS.md"), encoding="utf-8").read()
     start = doc.index("## When an alert arrives")
     end = doc.index("**Heartbeat missing", start)
     documented = set()
@@ -381,7 +389,7 @@ def test_routine_checks_only_references_files_that_exist():
     """Every scripts/… and tests/… path the routine tells the operator to run
     must exist — a doc that names a deleted script fails at the worst time."""
     import re
-    doc = open(os.path.join(_ROOT, "ROUTINE_CHECKS.md"), encoding="utf-8").read()
+    doc = open(os.path.join(_ROOT, "docs", "ROUTINE_CHECKS.md"), encoding="utf-8").read()
     refs = set(re.findall(r"\b((?:scripts|tests)/[A-Za-z0-9_./*-]+\.(?:sh|py))\b", doc))
     assert refs, "the scan found no script/test references — the regex is broken"
     # Scripts that live in the OTHER repo (pingdin_platform) and are run on the
@@ -396,7 +404,7 @@ def test_routine_checks_only_references_files_that_exist():
 def test_routine_checks_states_the_numbers_the_config_actually_has():
     """The doc quotes counts and thresholds; each is checked against the source
     of truth so the doc cannot drift from the config it describes."""
-    doc = open(os.path.join(_ROOT, "ROUTINE_CHECKS.md"), encoding="utf-8").read()
+    doc = open(os.path.join(_ROOT, "docs", "ROUTINE_CHECKS.md"), encoding="utf-8").read()
     n_alerts = len(_alert_exprs())
     n_records = len(_recorded_names())
     assert f"{n_alerts + n_records} rules" in doc, f"expected the doc to say '{n_alerts + n_records} rules'"
@@ -469,7 +477,7 @@ def test_no_live_doc_claims_the_grafana_role_bypasses_rls():
     import re
     offenders = []
     for fn in ("README.md", "DEPLOYMENT_RUNBOOK.md", "ROUTINE_CHECKS.md", "SOVEREIGN_OBSERVABILITY.md"):
-        for n, line in enumerate(open(os.path.join(_ROOT, fn), encoding="utf-8"), 1):
+        for n, line in enumerate(open(_doc_path(fn), encoding="utf-8"), 1):
             if re.search(r"RLS-bypassing|(?<!NO)BYPASSRLS", line):
                 offenders.append(f"{fn}:{n}: {line.strip()[:80]}")
     assert offenders == [], offenders
@@ -575,7 +583,7 @@ def test_the_drill_sed_commands_in_the_routine_doc_do_what_they_say():
     copy of the real file: the result must be valid YAML with the extra target, and
     the revert must restore the original."""
     import re, shutil, subprocess, tempfile
-    doc = open(os.path.join(_ROOT, "ROUTINE_CHECKS.md"), encoding="utf-8").read()
+    doc = open(os.path.join(_ROOT, "docs", "ROUTINE_CHECKS.md"), encoding="utf-8").read()
     add = re.search(r"^(sed -i 's#\^ +- https://app\.pingd\.in/health#.*)$", doc, re.M)
     rev = re.search(r"^(sed -i '/drill-404/d' prometheus/prometheus\.yml)$", doc, re.M)
     assert add and rev, "the drill's sed commands are missing from ROUTINE_CHECKS.md"
@@ -639,7 +647,7 @@ def test_probe_checks_in_the_live_docs_use_get_not_head():
     """Journey 17. `curl -I` sends HEAD; Edge's /health is GET-only and answers 405, so the
     documented check reported a failure for a healthy endpoint (the probe itself uses GET)."""
     for fn in ("ROUTINE_CHECKS.md", "DEPLOYMENT_RUNBOOK.md", "README.md", "SOVEREIGN_OBSERVABILITY.md"):
-        for n, line in enumerate(open(os.path.join(_ROOT, fn), encoding="utf-8"), 1):
+        for n, line in enumerate(open(_doc_path(fn), encoding="utf-8"), 1):
             assert "curl -sSI" not in line, f"{fn}:{n} uses a HEAD request: {line.strip()[:90]}"
 
 

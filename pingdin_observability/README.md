@@ -24,10 +24,10 @@ able to exactly trace the cause of anything, for any user, at any time.
 | `tests/` | `test_config_consistency.py` (structural checks across rules, dashboards, compose, alertmanager), `test_alert_bridge_formatting.py`, `test_pin_image_digests.py`. Run each: `python3 tests/<file>.py` |
 | `scripts/` | Droplet provisioning (hardening, Tailscale) and `pin_image_digests.py` (prints the digest of each floating-tag image already running, to pin) |
 | `main-droplet-companion/` | The ONE script that runs on the main droplet instead — see its own README |
-| `SOVEREIGN_OBSERVABILITY.md` | What centralizes across sovereignty tiers, what deliberately doesn't, and why |
-| `DEPLOYMENT_RUNBOOK.md` | The actual, ordered, tested sequence to stand this up |
-| `ROUTINE_CHECKS.md` | Day-to-day: what to check after a deploy / daily / weekly / monthly / quarterly, what "good" looks like, **what to do when each alert arrives**, and what is worth automating next |
-| `BUILD_LOG.md` | This repo's own authoritative decision record — same discipline `pingdin_platform`'s own `BUILD_LOG.md` follows |
+| `docs/SOVEREIGN_OBSERVABILITY.md` | What centralizes across sovereignty tiers, what deliberately doesn't, and why |
+| `docs/DEPLOYMENT_RUNBOOK.md` | The actual, ordered, tested sequence to stand this up |
+| `docs/ROUTINE_CHECKS.md` | Day-to-day: what to check after a deploy / daily / weekly / monthly / quarterly, what "good" looks like, **what to do when each alert arrives**, and what is worth automating next |
+| `docs/BUILD_LOG.md` | This repo's own authoritative decision record — same discipline `pingdin_platform`'s own `BUILD_LOG.md` follows |
 
 ## Architecture, one paragraph
 
@@ -57,10 +57,20 @@ heartbeat message proves the whole chain works — its absence is the signal.
 
 Metrics, logs, and traces are live and connected — a real message produces one trace spanning `pingdin-edge` through `pingdin-core`/`-compute` (it started at `pingdin-n8n` until platform Journey 484) (confirmed via the `traceparent` header value matching the Tempo trace ID exactly, not inferred). Telegram alerting works through both channels `alert_bridge` serves. The audit-trail dashboard renders real `core.audit_log` rows.
 
-Seven real bugs were found and fixed getting here — see `BUILD_LOG.md` Journey 2 for the full account, including a confirmed upstream Grafana 12.2.0 regression that required pinning the image version, and a Tempo 3.0 breaking config change that landed after this repo's own knowledge cutoff.
+Seven real bugs were found and fixed getting here — see `docs/BUILD_LOG.md` Journey 2 for the full account, including a confirmed upstream Grafana 12.2.0 regression that required pinning the image version, and a Tempo 3.0 breaking config change that landed after this repo's own knowledge cutoff.
 
 ## Not built yet, named honestly
 
-- **Sovereign telemetry forwarding** — see `SOVEREIGN_OBSERVABILITY.md`.
+- **Sovereign telemetry forwarding** — see `docs/SOVEREIGN_OBSERVABILITY.md`.
   No Sovereign tenant exists yet; nothing here blocks Managed-tier
   rollout by deferring this.
+
+## This repository
+
+On the laptop it is `pingd.in_agent_platform/pingdin_observability-repo/` (the git checkout; this folder, `pingdin_observability/`, sits inside it), on GitHub it is the private repository `pingdin-observability`, branch `master`. The platform has its own separate repository (`pingdin-platform`); the folder above both is not a repository. After a deploy that printed `DEPLOY OK`, in `pingdin_observability-repo/`:
+
+```bash
+git add -A && git commit -m "Obs journey <N>, as deployed" && git push origin master
+```
+
+Unpack a tarball with `tar xzf <tarball>` from inside `pingdin_observability-repo/`; never delete the folder first (the `.git` is in `pingdin_observability-repo/`, one level above this folder). The long documents are in `docs/`.

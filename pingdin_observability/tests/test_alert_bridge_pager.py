@@ -60,7 +60,7 @@ def test_disk_and_swap_alerts_exist_with_the_right_severity():
 
 
 def test_the_routine_checks_explain_how_to_switch_on_and_test_the_pager():
-    doc = open(os.path.join(_ROOT, "ROUTINE_CHECKS.md"), encoding="utf-8").read()
+    doc = open(os.path.join(_ROOT, "docs", "ROUTINE_CHECKS.md"), encoding="utf-8").read()
     assert "## The pager: critical alerts also ring the phone" in doc and "PagerTest" in doc and "ALERT_BRIDGE_PUSHOVER_TOKEN" in doc
 
 

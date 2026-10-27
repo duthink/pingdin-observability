@@ -1745,3 +1745,27 @@ Direct report (26 Oct 2026): `SwapInUse` fired on the main droplet. The checks s
 
 ### What to check — Journey 26
 Prometheus → Alerts: `SwapInUse` is inactive. The alert does not return unless `vmstat 5 3` also shows non-zero `si`/`so`.
+
+
+## Journey 27 — the documents move into docs/; the repository is on GitHub (27 Oct 2026)
+
+Direct request (27 Oct 2026): both repositories are now on GitHub (`pingdin-platform`, `pingdin-observability`); keep the documents in step, give this repository a `docs/` folder like the platform's, and trim redundancy without losing information.
+
+**Changed.**
+1. `DEPLOYMENT_RUNBOOK.md`, `ROUTINE_CHECKS.md`, `SOVEREIGN_OBSERVABILITY.md` and this `BUILD_LOG.md` moved into `docs/`; `README.md` stays at the top. References in `README.md` and `scripts/README.md` and the paths read by `test_config_consistency`, `test_alert_bridge_pager` and `test_ops_daily_check` follow. Documents refer to each other by name, which still works inside `docs/`.
+2. README gained "This repository": where it lives on the laptop and on GitHub, the one-line wrap-up (`git add -A && git commit … && git push origin master`) and the unpacking rule that keeps the `.git` safe.
+3. Redundancy: nothing was removed. A search for repeated paragraphs across these documents found none worth merging; each document has a different job (build, daily routine, sovereign tiers).
+
+**Honest limits.** The next sync prunes the old copies of the four files from `/opt/pingdin_observability` on the droplet (the mirror step), which is the intended effect; the documents are not used by any running service.
+
+### Verification — Journey 27
+All eight test files pass (`test_config_consistency` 37, `test_alert_bridge_pager` 6, `test_ops_daily_check` 15, `test_deploy_scripts` 20, `test_prune_extras` 12 and the rest).
+
+### Deployment — Journey 27
+No server change is needed; syncing only brings the moved documents.
+1. **Laptop:** in `pingdin_observability-repo/`, `tar xzf pingdin_observability_journey_27.tar.gz`, then delete the four old files at the top of `pingdin_observability/` (`ls pingdin_observability/*.md` should list only `README.md`): `rm pingdin_observability/DEPLOYMENT_RUNBOOK.md pingdin_observability/ROUTINE_CHECKS.md pingdin_observability/SOVEREIGN_OBSERVABILITY.md pingdin_observability/BUILD_LOG.md`.
+2. **Laptop:** `bash pingdin_observability/scripts/sync_to_server.sh --deploy` → `prune:` lists the four old files, then `DEPLOY OK`.
+3. **Laptop wrap-up:** `git add -A && git commit -m "Obs journey 27, as deployed" && git push origin master`.
+
+### What to check — Journey 27
+`ls pingdin_observability/docs` shows the four documents; `git status` is clean after the commit; the Telegram heartbeat is unaffected.

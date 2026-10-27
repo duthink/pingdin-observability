@@ -11,7 +11,7 @@ overwrites on a second run).
 | `00_provision_and_harden.sh` | Base OS hardening, deploy user, Docker, UFW (public-facing SSH only) |
 | `01_tailscale_setup.sh` | Installs Tailscale, joins the tailnet, writes `TAILSCALE_IP` into `.env` |
 
-After both: `docker compose up -d`, then follow `DEPLOYMENT_RUNBOOK.md`
+After both: `docker compose up -d`, then follow `docs/DEPLOYMENT_RUNBOOK.md`
 for Grafana access and confirming the main droplet's own
 `pingdin-alloy-edge` is actually reaching this droplet.
 

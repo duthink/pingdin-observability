@@ -217,7 +217,7 @@ def test_dotenv_is_never_executed():
 
 
 def test_the_cron_line_in_the_docs_matches_the_script():
-    doc = open(os.path.join(_ROOT, "ROUTINE_CHECKS.md"), encoding="utf-8").read()
+    doc = open(os.path.join(_ROOT, "docs", "ROUTINE_CHECKS.md"), encoding="utf-8").read()
     line = "20 6 * * * cd /opt/pingdin_observability && bash scripts/ops_daily_check.sh >> ops-check.log 2>&1"
     assert line in doc
     assert line in open(os.path.join(_ROOT, "scripts", "ops_daily_check.sh"), encoding="utf-8").read()
