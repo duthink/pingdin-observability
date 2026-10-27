@@ -73,4 +73,11 @@ On the laptop it is `pingd.in_agent_platform/pingdin_observability-repo/` (the g
 git add -A && git commit -m "Obs journey <N>, as deployed" && git push origin master
 ```
 
-Unpack a tarball with `tar xzf <tarball>` from inside `pingdin_observability-repo/`; never delete the folder first (the `.git` is in `pingdin_observability-repo/`, one level above this folder). The long documents are in `docs/`.
+Download the tarball into `pingd.in_agent_platform/` (the folder above both repositories), then unpack it from inside the repository, guarded so it stops if the `.git` is missing:
+
+```bash
+cd ~/clients/pingd.in/pingd.in_agent_platform/pingdin_observability-repo
+ls -d .git && tar xzf ../pingdin_observability_journey_<N>.tar.gz
+```
+
+Never extract it in the parent folder and never delete or replace `pingdin_observability-repo/` first: the `.git` is in that folder, one level above this one, and a replaced folder takes it along (27 Oct 2026). Extracting never deletes a file a journey removed; each BUILD_LOG "Deployment" lists the `rm`. To recover a lost `.git`: `git clone https://github.com/duthink/pingdin-observability.git ~/clone && mv ~/clone/.git . && rm -rf ~/clone`, then `git status -sb` shows only the new journey's changes. This repository has no GitHub Actions workflow; its tests run in the deploy (`scripts/sync_to_server.sh --deploy`). The long documents are in `docs/`.

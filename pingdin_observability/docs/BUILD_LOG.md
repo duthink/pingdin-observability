@@ -1769,3 +1769,21 @@ No server change is needed; syncing only brings the moved documents.
 
 ### What to check — Journey 27
 `ls pingdin_observability/docs` shows the four documents; `git status` is clean after the commit; the Telegram heartbeat is unaffected.
+
+
+## Journey 28 — the unpack steps and the laptop folders written down (27 Oct 2026)
+
+Direct request (27 Oct 2026): check the deploy steps and the documents against the two GitHub repositories. The platform's `ci` workflow was found in the wrong place (platform Journey 536); this repository has none, so only its README changes.
+
+**Changed.** `README.md` "This repository": where a tarball is downloaded (`pingd.in_agent_platform/`), the unpack command guarded with `ls -d .git &&`, the rule never to extract in the parent or replace the folder (the `.git` was lost that way on 27 Oct 2026), how to recover it from GitHub, and that this repository has no Actions workflow (its tests run in the deploy).
+
+### Verification — Journey 28
+The documents' tests pass (`test_config_consistency` and the rest of the eight files).
+
+### Deployment — Journey 28
+Documents only; nothing on the droplet changes.
+1. **Laptop:** `cd ~/clients/pingd.in/pingd.in_agent_platform/pingdin_observability-repo`, then `ls -d .git && tar xzf ../pingdin_observability_journey_28.tar.gz`.
+2. **Laptop wrap-up** (no deploy, so no sync is needed): `git add -A && git commit -m "Obs journey 28: unpack steps" && git push origin master`; `git status -sb | head -1` shows `## master...origin/master`.
+
+### What to check — Journey 28
+`sed -n 1,5p pingdin_observability/README.md` still reads normally; `git log --oneline -1` shows the new commit and GitHub shows it.
