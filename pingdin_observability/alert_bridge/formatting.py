@@ -19,6 +19,21 @@ def is_watchdog(alert: dict) -> bool:
     return (alert.get("labels") or {}).get("alertname") == WATCHDOG_ALERTNAME
 
 
+def should_page(alert: dict) -> bool:
+    """BUILD_LOG Journey 25 — a critical alert that has just STARTED firing also rings the phone (Pushover, emergency priority). Telegram is a silent chat message at 3 a.m.; when the
+    main droplet is down it cannot page for itself, so this droplet has to. Resolved alerts, warnings and the always-on Watchdog never page."""
+    labels = alert.get("labels") or {}
+    return alert.get("status") == "firing" and labels.get("severity") == "critical" and not is_watchdog(alert)
+
+
+def pager_payload(token: str, user: str, alert: dict) -> dict:
+    """The Pushover form fields for one alert: emergency priority 2 (rings every 60 s until acknowledged, for up to 30 minutes), the same settings as the platform's own pager."""
+    labels = alert.get("labels") or {}
+    summary = (alert.get("annotations") or {}).get("summary", "(no summary)")
+    name = labels.get("alertname", "unknown_alert")
+    return {"token": token, "user": user, "title": f"Pingdin: {name}"[:250], "message": summary[:1000], "priority": 2, "retry": 60, "expire": 1800}
+
+
 def format_alertmanager_alert(alert: dict) -> str:
     """One Alertmanager alert -> one Telegram message body.
 

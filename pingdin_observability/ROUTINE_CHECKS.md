@@ -99,7 +99,7 @@ arrives within about a minute. After **editing a rule or alert file**:
 `docker compose up -d --force-recreate pingdin-obs-prometheus` (mounted rule
 files are read at start only), then
 `curl -sS http://$TS:9090/api/v1/rules | python3 -c "import sys,json;print(sum(len(g['rules']) for g in json.load(sys.stdin)['data']['groups']),'rules')"`
-→ `24 rules`, and none with `"health":"err"`.
+→ `27 rules`, and none with `"health":"err"`.
 
 Run the tests only if `tests/` changed (PyYAML is not on the droplet, so in a
 throwaway container):
@@ -187,6 +187,9 @@ Run on the droplet named in the last column.
 | `LokiDown` (critical) | Loki's own `/metrics` scrape is gone — logs are not being stored | `docker compose ps pingdin-obs-loki`; `docker logs --tail 50 pingdin-obs-loki` | obs |
 | `TempoDown` (critical) | Tempo's `/metrics` scrape is gone — traces are not being stored | `docker compose ps pingdin-obs-tempo`; `docker logs --tail 50 pingdin-obs-tempo` | obs |
 | `AlertBridgeDown` (critical) | The bridge isn't reporting. **This message may not reach you** (it travels through the bridge) — you will more likely notice the missing heartbeat | `docker compose ps pingdin-alert-bridge`; `docker logs --tail 50 pingdin-alert-bridge` | obs |
+| `DiskAlmostFull` (critical) | A filesystem below 5% free for 5 min. **Also rings the phone.** A full disk stops the database | `df -h /`; `sudo du -xh --max-depth=2 / \| sort -h \| tail -15`; `docker system df`; on main also `du -sh backups/*` and `/tmp` | the alerting host |
+| `DiskFillingFast` (critical) | The root disk will be full within about 4 hours at the last hour's rate (and is under 60% free). **Also rings the phone** | Same as above: find what grows (`du -sh backups/wal_archive`, `/tmp/pytest-*`, `docker system df`) before it is full | the alerting host |
+| `SwapInUse` (warning) | Over 800 MB in swap AND pages moving to and from it (over 50 a second) for 15 min: memory is really short. Swap that is merely full of idle pages does not fire it | `free -m`; `vmstat 5 3` (`si`/`so` non-zero); `docker stats --no-stream`; resize the droplet or lower a container's limit. If swap is full but `vmstat` shows no movement and memory is available: `sudo swapoff -a && sudo swapon -a` | the alerting host |
 | `HighCPUUsage` (warning) | CPU > 90% for 10 min | `top`/`docker stats --no-stream`; Grafana *Host & Container Resources* for which container | the alerting host |
 | `HighMemoryUsage` (warning) | Memory > 90% for 10 min | `free -h`; `docker stats --no-stream` | the alerting host |
 | `ContainerNearMemoryLimit` (warning) | One container is above 90% of its own `mem_limit` for 10 min — it will be OOM-killed and restarted | `docker stats --no-stream`; Grafana *Host & Container Resources*; raise it via `<SVC>_MEM_LIMIT` in `.env` (the platform repo's suggest-limits helper proposes values), then `docker compose up -d <svc>` | main |
@@ -206,6 +209,19 @@ so. On this droplet: `docker compose ps` (Prometheus, Alertmanager, bridge up?);
 `curl -s -o /dev/null -w "%{http_code}\n" http://$TS:8090/health` → `200`. If the
 droplet itself is unreachable, that is the one failure nothing here can announce
 — see the next section.
+
+## The pager: critical alerts also ring the phone (BUILD_LOG Journey 25)
+
+Telegram is a chat message and is silent at 3 a.m. An alert whose severity is `critical` (a service down, the public site down, `DiskAlmostFull`, `DiskFillingFast`, the bridge or prober itself down) now also goes to Pushover at emergency priority: it rings every minute until you press Acknowledge, for up to 30 minutes. Warnings, resolved messages and the daily heartbeat never page. This droplet is the one that must page when the main droplet is down, because a dead droplet cannot page for itself.
+
+**Switch it on** (once, on this droplet): add two lines to `/opt/pingdin_observability/.env` with the SAME Pushover application token and user (or delivery-group) key as `OWNER_ALERT_PUSHOVER_TOKEN` and `OWNER_ALERT_PUSHOVER_USER` in the main droplet's `.env`: `ALERT_BRIDGE_PUSHOVER_TOKEN=…` and `ALERT_BRIDGE_PUSHOVER_USER=…`. Then `bash scripts/deploy.sh` (it rebuilds and re-creates the bridge). Never print those values.
+
+**Test it** (after every change to those two lines, and once a quarter with the fire drill): on this droplet
+
+```bash
+docker exec pingdin-alert-bridge python3 -c "import httpx; print(httpx.post('http://localhost:8090/alertmanager', json={'alerts':[{'status':'firing','labels':{'alertname':'PagerTest','severity':'critical'},'annotations':{'summary':'Test page from the observability droplet. Please ignore.'}}]}).text)"
+```
+Expect `{"delivered":1,"received":1}`, a Telegram message "[FIRING] PagerTest (critical)", and your phone ringing: press Acknowledge. No ring but the Telegram message arrived: the two Pushover lines are missing or wrong (`docker logs --tail 20 pingdin-alert-bridge` shows `Pager (Pushover) send failed`). If Telegram is down, Alertmanager retries the batch and the page can ring again on each retry.
 
 ## Automation and systems: what is built, and what is still worth adding
 

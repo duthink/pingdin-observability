@@ -81,6 +81,10 @@ services:
       # own .env for pingdin-edge/pingdin-core — see
       # main-droplet-companion/README.md.
       OWNER_ALERT_WEBHOOK_TOKEN: ${OWNER_ALERT_WEBHOOK_TOKEN}
+      # BUILD_LOG Journey 25 — the pager: a critical alert that starts firing also rings the phone. The same Pushover application token and user (or delivery-group) key as the
+      # main droplet's OWNER_ALERT_PUSHOVER_TOKEN / _USER. Empty = no pager (Telegram only, as before).
+      ALERT_BRIDGE_PUSHOVER_TOKEN: ${ALERT_BRIDGE_PUSHOVER_TOKEN:-}
+      ALERT_BRIDGE_PUSHOVER_USER: ${ALERT_BRIDGE_PUSHOVER_USER:-}
     networks:
       - pingdin-observability-net
     healthcheck:

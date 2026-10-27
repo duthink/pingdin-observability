@@ -43,6 +43,8 @@ from formatting import (
     delivery_status_code,
     format_alertmanager_alert,
     format_owner_alert,
+    pager_payload,
+    should_page,
 )
 
 logging.basicConfig(
@@ -77,6 +79,24 @@ TELEGRAM_CHAT_ID = os.environ.get("ALERT_BRIDGE_TELEGRAM_CHAT_ID")
 OWNER_ALERT_WEBHOOK_TOKEN = os.environ.get("OWNER_ALERT_WEBHOOK_TOKEN")
 
 TELEGRAM_API_TIMEOUT = 15.0
+
+# BUILD_LOG Journey 25 — the pager. Same Pushover application token and user (or delivery-group) key as the main droplet's OWNER_ALERT_PUSHOVER_*; unset = no pager, nothing else changes.
+PUSHOVER_TOKEN = os.environ.get("ALERT_BRIDGE_PUSHOVER_TOKEN")
+PUSHOVER_USER = os.environ.get("ALERT_BRIDGE_PUSHOVER_USER")
+PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
+
+
+def _send_pager(alert: dict) -> bool:
+    """Best effort and never raises: a pager failure must not change what Alertmanager is told (Telegram decides that), and must not hide the Telegram message."""
+    if not PUSHOVER_TOKEN or not PUSHOVER_USER:
+        return False
+    try:
+        resp = httpx.post(PUSHOVER_URL, data=pager_payload(PUSHOVER_TOKEN, PUSHOVER_USER, alert), timeout=httpx.Timeout(8.0, connect=3.0))
+        resp.raise_for_status()
+        return True
+    except httpx.HTTPError as e:
+        logger.error("Pager (Pushover) send failed: %s", type(e).__name__)
+        return False
 
 
 def _send_telegram(text: str) -> bool:
@@ -118,6 +138,8 @@ async def alertmanager_webhook(request: Request):
     for alert in alerts:
         if _send_telegram(format_alertmanager_alert(alert)):
             delivered += 1
+        if should_page(alert):
+            _send_pager(alert)
 
     # Non-2xx when Telegram failed, so Alertmanager retries the batch instead
     # of treating it as delivered (see formatting.delivery_status_code).

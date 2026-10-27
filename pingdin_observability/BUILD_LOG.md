@@ -1699,3 +1699,49 @@ Do this **after** the platform's Journey 484 cutover is confirmed (otherwise the
 ## Journey 24 — verified live after the platform cutover; room check noted (14 Oct 2026; docs only)
 Journey 23 was deployed on 14 Oct 2026: `PublicEndpointDown` for `gateway.pingd.in` resolved and nothing else paged. The platform's cutover (Journeys 484 to 488) then removed n8n for good (container, volumes, image, database, role) and its DNS record. Findings recorded here so the two repos agree: the main droplet has room (about 2.2 GB of 3.8 GB available, no swapping, disk 23%, load 1.3 on 2 cores); Edge, Alloy and Core sit at 55 to 65% of their container limits, so `ContainerNearMemoryLimit` (90% for 10 minutes) is the right early warning. No rule, probe or dashboard changed. The `.env` name `OBSERVABILITY_GATEWAY_TS_IP` is historical (it is this droplet's Tailscale IP, not a gateway) and stays, because renaming it would break every existing server. ROUTINE_CHECKS weekly step 3 now points at the platform's room check.
 
+
+## Journey 25 — critical alerts also ring the phone; disk-filling and swap alerts (pairs with pingdin_platform Journey 530) (26 Oct 2026)
+
+Direct question (26 Oct 2026): does this repo need to be connected to the Pushover pager? Yes. The main droplet pages by itself (Pushover, emergency priority), but this droplet is the one that must page when the main droplet is down, and until now every alert here went only to Telegram, a silent chat message at 3 a.m. Also on 26 Oct the main droplet's disk went from 26% to 99% in a day; the only disk alert here (`LowDiskSpace`, 15% free, a warning) would have reached only that silent chat.
+
+**Built.**
+1. **The pager.** `alert_bridge/formatting.py` gains `should_page` (a firing `critical` alert, never resolved, never a warning, never the Watchdog) and `pager_payload` (Pushover emergency priority 2, repeat every 60 s for up to 30 min, the same as the platform's own pager). `alert_bridge/main.py` calls `_send_pager` after the Telegram send, best effort: it never raises, and does nothing unless `ALERT_BRIDGE_PUSHOVER_TOKEN` and `ALERT_BRIDGE_PUSHOVER_USER` are set (the same values as `OWNER_ALERT_PUSHOVER_TOKEN` / `_USER` on the main droplet; the user value may be a group key). `docker-compose.yml` passes them through (empty by default); `.env.example` lists them without values.
+2. **Three rules.** `DiskAlmostFull` (critical, below 5% free for 5 min), `DiskFillingFast` (critical, the root disk predicted full within 4 hours from the last hour's rate, only while under 60% free) and `SwapInUse` (warning, over 800 MB for 30 min). Rows added to the ROUTINE_CHECKS alert table; rule count 24 → 27.
+3. **Docs.** ROUTINE_CHECKS gains "The pager: critical alerts also ring the phone" with how to switch it on and the exact test command.
+4. Tests: `test_alert_bridge_pager` (6: who pages, the payload, the wiring, compose and example env, the new rules, the doc).
+
+**Honest limits.**
+- If Telegram is down Alertmanager retries the batch, and the page can ring again on each retry. The page is not sent for a resolved alert and does not cancel a ringing page when the problem resolves (acknowledge it).
+- `DiskFillingFast` watches the root disk only (`mountpoint="/"`). The expression has not run against live data here; the first quiet week shows whether it is too eager (it needs a 15-minute hold).
+- Nothing here edits your `.env`; you add the two lines.
+
+### Verification — Journey 25
+`test_alert_bridge_pager` (6), `test_alert_bridge_formatting` (8), `test_config_consistency` (37), `test_deploy_scripts`, `test_ops_daily_check` and the rest of this repo's tests pass.
+
+### Deployment — Journey 25
+1. Obs droplet: add to `/opt/pingdin_observability/.env` the two lines `ALERT_BRIDGE_PUSHOVER_TOKEN=…` and `ALERT_BRIDGE_PUSHOVER_USER=…` (the same values as the main droplet's `OWNER_ALERT_PUSHOVER_TOKEN` / `_USER`; do not print them).
+2. Laptop: `tar xzf pingdin_observability_journey_25.tar.gz` over the repo folder, then `bash pingdin_observability/scripts/sync_to_server.sh --deploy` → `DEPLOY OK` (rebuilds the bridge, recreates Prometheus with the new rules).
+3. Obs droplet: `curl -sS http://$TS:9090/api/v1/rules | python3 -c "import sys,json;print(sum(len(g['rules']) for g in json.load(sys.stdin)['data']['groups']),'rules')"` → `27 rules`, none with `"health":"err"`.
+4. Obs droplet: run the pager test in ROUTINE_CHECKS ("The pager") → `{"delivered":1,"received":1}`, a Telegram "[FIRING] PagerTest (critical)", the phone rings; press Acknowledge.
+
+### What to check — Journey 25
+Prometheus → Alerts lists `DiskAlmostFull`, `DiskFillingFast`, `SwapInUse` (inactive or pending, not firing unless the droplet really is in that state); the pager test rings the phone; the 💚 heartbeat still arrives and does not ring.
+
+## Journey 26 — the swap alert needs swapping, not just swap in use (26 Oct 2026)
+
+Direct report (26 Oct 2026): `SwapInUse` fired on the main droplet. The checks showed 879 MB in swap but 2.2 GB of memory available, `vmstat` `si`/`so` at 0–3 (no swap traffic) and no out-of-memory kills: idle pages parked on disk, not a fault.
+
+**Changed.** `SwapInUse` (Journey 25) now fires only when over 800 MB is in swap AND pages are moving to and from it (over 50 a second, from `node_vmstat_pswpin` + `node_vmstat_pswpout`) for 15 minutes. The ROUTINE_CHECKS row says how to tell the two cases apart and gives the one-off `swapoff -a && swapon -a` for full-but-idle swap. Test: `test_alert_bridge_pager` checks the rule reads the swap-traffic series.
+
+**Honest limits.** The expression has not run against live data here; if it never fires in a month of normal use, the 50 pages a second may be too high. The droplet still has about 3.1 GB of container limits on 3.9 GB of RAM: a resize is still the real fix.
+
+### Verification — Journey 26
+`test_alert_bridge_pager` (6) and `test_config_consistency` (37, including the doc table and rule count) pass.
+
+### Deployment — Journey 26
+1. Main droplet: `sudo swapoff -a && sudo swapon -a`, then `echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf && sudo sysctl --system`.
+2. Laptop: `tar xzf pingdin_observability_journey_26.tar.gz` over the repo folder, then `bash pingdin_observability/scripts/sync_to_server.sh --deploy` → `DEPLOY OK`.
+3. Obs droplet: `TS=$(tailscale ip -4)` then the rules count command from Journey 25 → `27 rules`, none with `"health":"err"`.
+
+### What to check — Journey 26
+Prometheus → Alerts: `SwapInUse` is inactive. The alert does not return unless `vmstat 5 3` also shows non-zero `si`/`so`.

@@ -61,6 +61,34 @@ groups:
         annotations:
           summary: "Disk space below 15% on {{ $labels.instance }} ({{ $labels.mountpoint }})"
 
+      # BUILD_LOG Journey 25 — the disk filled from 26% to 99% in a day on the main droplet (pingdin_platform Journey 530) while the 15%-free warning above went to a silent chat.
+      # Two critical rules (they also ring the phone): almost full, and on course to be full within 4 hours judged from the last hour. Swap in use is the early sign of a memory squeeze.
+      - alert: DiskAlmostFull
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk almost full: below 5% free on {{ $labels.instance }} ({{ $labels.mountpoint }}). A full disk stops the database."
+
+      - alert: DiskFillingFast
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint="/"}[1h], 4 * 3600) < 0 and (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint="/"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay",mountpoint="/"}) * 100 < 60
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk on {{ $labels.instance }} will be full within about 4 hours at the rate of the last hour."
+
+      # BUILD_LOG Journey 26 — swap USED is not a problem by itself: idle pages parked on disk cost nothing (26 Oct 2026: 879 MB used, 2.2 GB of memory available, no swap traffic, and this rule
+      # fired anyway). It now needs pages actually moving to and from swap (over 50 pages a second, about 200 KB/s, for 15 minutes) while a lot of swap is in use.
+      - alert: SwapInUse
+        expr: (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) > 800 * 1024 * 1024 and (rate(node_vmstat_pswpin[10m]) + rate(node_vmstat_pswpout[10m])) > 50
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} is swapping heavily (over 800 MB in swap and pages moving for 15 minutes): memory is short; consider a larger droplet."
+
       # BUILD_LOG Journey 9 — this droplet's own log and trace stores. Before
       # this, nothing alerted if Loki or Tempo died (only the node/cAdvisor
       # exporters were watched); the main droplet's Alloy would just retry
