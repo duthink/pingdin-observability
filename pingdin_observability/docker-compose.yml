@@ -16,10 +16,20 @@
 # convention pingdin_platform's own Directus already uses) or an SSH
 # tunnel before Tailscale is set up.
 
+# Journey 30 (pairs with pingdin_platform Journey 539) — every container's log is capped. Docker's default json-file driver keeps a
+# container's output forever under /var/lib/docker/containers; Loki and Prometheus are this droplet's real stores, the container log is only
+# for `docker logs`. Per container: DOCKER_LOG_MAX_FILE files of DOCKER_LOG_MAX_SIZE (default 5 x 10m). Recreate containers after a change.
+x-logging: &bounded-logs
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   pingdin-obs-prometheus:
     image: prom/prometheus:latest
     container_name: pingdin-obs-prometheus
+    logging: *bounded-logs
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -52,6 +62,7 @@ services:
   pingdin-obs-alertmanager:
     image: prom/alertmanager:latest
     container_name: pingdin-obs-alertmanager
+    logging: *bounded-logs
     restart: unless-stopped
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
@@ -73,6 +84,7 @@ services:
   pingdin-alert-bridge:
     build: ./alert_bridge
     container_name: pingdin-alert-bridge
+    logging: *bounded-logs
     restart: unless-stopped
     environment:
       ALERT_BRIDGE_TELEGRAM_BOT_TOKEN: ${ALERT_BRIDGE_TELEGRAM_BOT_TOKEN}
@@ -103,6 +115,7 @@ services:
   pingdin-obs-loki:
     image: grafana/loki:latest
     container_name: pingdin-obs-loki
+    logging: *bounded-logs
     restart: unless-stopped
     command: -config.file=/etc/loki/loki-config.yaml
     volumes:
@@ -122,6 +135,7 @@ services:
   pingdin-obs-tempo:
     image: grafana/tempo:latest
     container_name: pingdin-obs-tempo
+    logging: *bounded-logs
     restart: unless-stopped
     command: -config.file=/etc/tempo/tempo.yaml
     volumes:
@@ -157,6 +171,7 @@ services:
     # on whether a later `:latest` pull actually includes a fix.
     image: grafana/grafana:12.1.1
     container_name: pingdin-obs-grafana
+    logging: *bounded-logs
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
@@ -199,6 +214,7 @@ services:
   pingdin-obs-node-exporter:
     image: prom/node-exporter:latest
     container_name: pingdin-obs-node-exporter
+    logging: *bounded-logs
     restart: unless-stopped
     pid: host
     volumes:
@@ -216,6 +232,7 @@ services:
   pingdin-obs-cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: pingdin-obs-cadvisor
+    logging: *bounded-logs
     restart: unless-stopped
     volumes:
       - /:/rootfs:ro
@@ -238,6 +255,7 @@ services:
   pingdin-obs-blackbox:
     image: prom/blackbox-exporter:latest
     container_name: pingdin-obs-blackbox
+    logging: *bounded-logs
     restart: unless-stopped
     command:
       - --config.file=/etc/blackbox/blackbox.yml

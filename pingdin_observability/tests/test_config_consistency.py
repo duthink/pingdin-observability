@@ -606,7 +606,8 @@ def test_compose_top_level_blocks_only_contain_what_belongs_in_them():
     `volumes:`) — valid YAML, invalid Compose, and the deploy would have failed. Every
     service must be under `services:`; `networks:`/`volumes:` may hold only definitions."""
     compose = _yaml("docker-compose.yml")
-    assert set(compose) <= {"services", "networks", "volumes", "name"}, set(compose)
+    # Compose extension fields (`x-...`, Journey 30's `x-logging`) are valid top-level keys; anything else is not.
+    assert {k for k in compose if not k.startswith("x-")} <= {"services", "networks", "volumes", "name"}, set(compose)
     service_keys = {"image", "build", "container_name", "command", "restart", "ports", "depends_on", "healthcheck", "environment"}
     for block in ("networks", "volumes"):
         for name, definition in (compose.get(block) or {}).items():
@@ -717,3 +718,14 @@ if __name__ == "__main__":
             print(f"FAILED: {t.__name__}")
             traceback.print_exc()
     print(f"{passed} passed, {failed} failed, {skipped} skipped (of {len(tests)})")
+
+
+def test_every_container_has_a_capped_log():
+    """Journey 30 (pairs with pingdin_platform Journey 539): Docker's default json-file log has no size limit, so a container's output
+    grew forever on this droplet's disk. Every service must use the bounded `x-logging` settings."""
+    services = _yaml("docker-compose.yml")["services"]
+    bad = [name for name, svc in services.items()
+           if not ((svc.get("logging") or {}).get("options") or {}).get("max-size") or not ((svc.get("logging") or {}).get("options") or {}).get("max-file")]
+    assert not bad, f"no log cap on {bad} (add `logging: *bounded-logs`)"
+    compose = open(os.path.join(_ROOT, "docker-compose.yml"), encoding="utf-8").read()
+    assert 'max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"' in compose and 'max-file: "${DOCKER_LOG_MAX_FILE:-5}"' in compose

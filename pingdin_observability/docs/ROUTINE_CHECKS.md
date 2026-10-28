@@ -72,6 +72,8 @@ only **files** that are no longer in the repo, never replaces a directory, never
 nothing) if it would remove more than 40 files** — what syncing a partial or wrong folder looks like; read the list, then use `--prune-max N` only if intended.
 `--no-prune` skips it. If a sync reports a permission error, fix ownership once with `sudo chown -R duthink:duthink /opt/pingdin_observability`.
 
+**Container logs are capped** (Journey 30): every service in `docker-compose.yml` uses `x-logging` (5 files of 10 MB). A container keeps the setting it was created with: after a change to it, run `docker compose up -d` so every container is re-created, not only the ones `deploy.sh` re-creates.
+
 ## After every deploy to this droplet (or any `docker compose up -d`)
 
 ```bash

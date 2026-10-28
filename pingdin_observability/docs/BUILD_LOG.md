@@ -1805,3 +1805,25 @@ Documents only; nothing on the droplet changes.
 
 ### What to check — Journey 29
 `git log --oneline -1` shows the commit on GitHub.
+
+
+## Journey 30 — every container's log is capped (pairs with pingdin_platform Journey 539) (28 Oct 2026)
+
+Direct question (28 Oct 2026): could logs and backups grow until they fill the disk again, and does anything check? On this droplet Loki (30 days), Prometheus (30 days) and Tempo (14 days) already expire their own data, and `DiskAlmostFull`, `DiskFillingFast` and `LowDiskSpace` watch every host this Prometheus scrapes (both droplets). One thing had no limit: Docker's default json-file log driver keeps each container's output forever under `/var/lib/docker/containers/`.
+
+**Changed.** `docker-compose.yml` has an `x-logging` block (json-file, `max-size` `${DOCKER_LOG_MAX_SIZE:-10m}`, `max-file` `${DOCKER_LOG_MAX_FILE:-5}`: at most 50 MB per container) and every one of the 9 services uses it (`logging: *bounded-logs`). Tests: `test_every_container_has_a_capped_log` (new); `test_compose_top_level_blocks_only_contain_what_belongs_in_them` now accepts Compose extension fields (`x-…`), which the Compose specification allows at the top level, and still refuses anything else.
+
+**Honest limits.** A container keeps the log settings it was created with, so the cap applies only after each container is re-created (step 3 below). `deploy.sh` re-creates only the services that mount files from the repo; the exporters, cAdvisor and the alert bridge need the plain `docker compose up -d`.
+
+### Verification — Journey 30
+The suite passes here: 114 tests (113 before + 1 new), the compose file parses with all 9 services capped.
+
+### Deployment — Journey 30
+No `.env` change.
+1. **Laptop:** `cd ~/clients/pingd.in/pingd.in_agent_platform && bash replace_repo.sh pingdin_observability-repo` → `.git kept`; `git status` lists `docker-compose.yml`, `docs/BUILD_LOG.md`, `docs/ROUTINE_CHECKS.md`, `tests/test_config_consistency.py`.
+2. **Laptop:** `bash pingdin_observability/scripts/sync_to_server.sh --deploy` → `DEPLOY OK`.
+3. **Server** (`cd /opt/pingdin_observability`): `docker compose up -d` (re-creates the services whose log settings changed; each is back in seconds), then `docker ps -q | xargs docker inspect --format '{{.Name}} {{index .HostConfig.LogConfig.Config "max-size"}}'` → every line ends in `10m`.
+4. **Laptop wrap-up:** `git add -A && git commit -m "Obs journey 30: capped container logs" && git push origin master`.
+
+### What to check — Journey 30
+Step 3's inspect line shows `10m` for all 9 containers; Grafana and the alerts work as before (the daily check stays green; the Watchdog heartbeat keeps arriving).
