@@ -22,7 +22,7 @@ cd /opt/pingdin_observability
 
 | Signal | Mechanism | Reaches you as |
 |---|---|---|
-| A service, the main host, Postgres, Redis, Loki, Tempo or the alert bridge is down | Prometheus alert rules → Alertmanager → `alert_bridge` | 🔴 Telegram |
+| A service, the main host, Postgres, Loki, Tempo or the alert bridge is down | Prometheus alert rules → Alertmanager → `alert_bridge` | 🔴 Telegram |
 | CPU > 90% (10 min), memory > 90% (10 min), disk < 15% free (15 min), 5xx > 5% (5 min), p95 latency > 20 s (20 min, real traffic only) | same | 🔴 Telegram |
 | Alerting itself broken (Prometheus, Alertmanager or the bridge) | `Watchdog` always-on rule, once every 24 h; `AlertBridgeDown` | 💚 heartbeat — **its absence is the signal** |
 | A platform-detected failure (dashboard widget error, dead-lettered event…) | `alert_owner()` — two independent routes | ⚠️ Telegram, **two messages** (one direct, one `[pingdin-managed]` via the bridge) |
@@ -91,7 +91,7 @@ curl -sSG http://$TS:9090/api/v1/query --data-urlencode 'query=(probe_ssl_earlie
 | `docker compose ps` | 9 services `Up`; Prometheus, Alertmanager, Grafana, `pingdin-alert-bridge`, cAdvisor `(healthy)`. Loki, Tempo, node-exporter and the blackbox exporter plain `Up` (no Docker healthcheck **by design** — Prometheus watches them) | `unhealthy` → `docker inspect --format '{{json .State.Health}}' <container>` |
 | `find_stale_containers.sh` | `9 container(s) checked, 0 stale.` | `STALE` → run the **printed** command: `docker compose up -d --build --force-recreate <service>`. **Plain `docker compose up -d <service>` does not fix it** (it prints `Running` and leaves it stale — seen live) |
 | `up -d --dry-run … \| grep -i recreat` | **no output** | A line = that container's definition differs from what is running (you just changed compose, **or** it drifted — four exporters had, unnoticed for weeks). `docker compose up -d` applies it; it **restarts** that service |
-| `up` query | **15** lines, all `1`: `blackbox-public` (**one** line) and `obs-blackbox`, plus `alert-bridge`, `cadvisor` + `node` (main droplet's, instances `pingdin-cadvisor:8080` / `pingdin-node-exporter:9100`), `obs-cadvisor`, `obs-loki`, `obs-node`, `obs-tempo`, `pingdin-compute`, `-core`, `-edge`, `postgres`, `prometheus`, `redis` | a `0` or a missing line = that scrape is down → see the alert table; **two** `node` or `cadvisor` lines for more than 5 min = a job-name collision (should be impossible — tested) |
+| `up` query | **14** lines, all `1`: `blackbox-public` (**one** line) and `obs-blackbox`, plus `alert-bridge`, `cadvisor` + `node` (main droplet's, instances `pingdin-cadvisor:8080` / `pingdin-node-exporter:9100`), `obs-cadvisor`, `obs-loki`, `obs-node`, `obs-tempo`, `pingdin-compute`, `-core`, `-edge`, `postgres`, `prometheus` (`redis` left with Redis, Obs journey 31) | a `0` or a missing line = that scrape is down → see the alert table; **two** `node` or `cadvisor` lines for more than 5 min = a job-name collision (should be impossible — tested) |
 | alerts query | **only** `Watchdog firing` | anything else → alert table |
 | `probe_success` query | **one** line — `https://app.pingd.in/health` — `1` | a `0` = that URL fails from outside right now: alert table, `PublicEndpointDown`. No lines at all = the prober isn't running: `BlackboxExporterDown` |
 | certificate-days query | both URLs **30–90** days (Caddy renews about 30 days before expiry) | under 14 → `PublicCertExpiringSoon`; see the alert table |
@@ -101,7 +101,7 @@ arrives within about a minute. After **editing a rule or alert file**:
 `docker compose up -d --force-recreate pingdin-obs-prometheus` (mounted rule
 files are read at start only), then
 `curl -sS http://$TS:9090/api/v1/rules | python3 -c "import sys,json;print(sum(len(g['rules']) for g in json.load(sys.stdin)['data']['groups']),'rules')"`
-→ `27 rules`, and none with `"health":"err"`.
+→ `26 rules`, and none with `"health":"err"`.
 
 Run the tests only if `tests/` changed (PyYAML is not on the droplet, so in a
 throwaway container):
@@ -185,7 +185,6 @@ Run on the droplet named in the last column.
 | `MainDropletHostDown` (critical) | The main droplet's node-exporter metrics stopped arriving — the host, its Alloy relay, or Tailscale | `ssh` to it; `docker compose ps`; `docker logs --tail 30 pingdin-alloy-edge`; Tailscale console | main |
 | `PingdinEdgeDown` / `PingdinCoreDown` / `PingdinComputeDown` (critical) | That service's `/metrics` scrape is gone or `0` | `docker compose ps <svc>`; `docker logs --tail 50 <svc>` | main |
 | `PostgresDown` (critical) | `pg_up == 0` — the exporter can't reach Postgres | `docker compose ps pingdin-db pingdin-postgres-exporter`; `docker logs --tail 30 pingdin-db` | main |
-| `RedisDown` (critical) | `redis_up == 0` | `docker compose ps pingdin-redis pingdin-redis-exporter` | main |
 | `LokiDown` (critical) | Loki's own `/metrics` scrape is gone — logs are not being stored | `docker compose ps pingdin-obs-loki`; `docker logs --tail 50 pingdin-obs-loki` | obs |
 | `TempoDown` (critical) | Tempo's `/metrics` scrape is gone — traces are not being stored | `docker compose ps pingdin-obs-tempo`; `docker logs --tail 50 pingdin-obs-tempo` | obs |
 | `AlertBridgeDown` (critical) | The bridge isn't reporting. **This message may not reach you** (it travels through the bridge) — you will more likely notice the missing heartbeat | `docker compose ps pingdin-alert-bridge`; `docker logs --tail 50 pingdin-alert-bridge` | obs |

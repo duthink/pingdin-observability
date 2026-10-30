@@ -24,8 +24,10 @@ def test_real_compose_classification():
     # Grafana is the one image this repo already pinned (after a real regression)
     assert images["pingdin-obs-grafana"] == "grafana/grafana:12.1.1"
     assert "pingdin-obs-grafana" not in floating
-    assert {"pingdin-obs-prometheus", "pingdin-obs-alertmanager", "pingdin-obs-loki",
-            "pingdin-obs-tempo", "pingdin-obs-node-exporter", "pingdin-obs-cadvisor"} <= floating
+    # Obs journey 31: the others float until `python3 scripts/pin_image_digests.py --write` has run on the server and the file came back;
+    # from then on they are digests. Either way none of them is classified as a fixed tag by mistake.
+    for name in ("pingdin-obs-prometheus", "pingdin-obs-alertmanager", "pingdin-obs-loki", "pingdin-obs-tempo", "pingdin-obs-node-exporter", "pingdin-obs-cadvisor"):
+        assert name in floating or "@sha256:" in images[name], name
     # alert_bridge is built locally: nothing to pin, and it must have no image: key
     assert "image" not in pin.load_services(os.path.join(_ROOT, "docker-compose.yml"))["pingdin-alert-bridge"]
 
@@ -77,6 +79,34 @@ def test_copy_is_identical_in_logic_to_the_platform_repo_copy_when_both_are_pres
     strip = lambda t: "\n".join(t.split('"""', 2)[2:])  # compare code, not the header docstring
     assert strip(open(other, encoding="utf-8").read()) == strip(open(os.path.join(_ROOT, "scripts", "pin_image_digests.py"), encoding="utf-8").read())
 
+
+
+# ── --write (Obs journey 31: this copy had lost it; the platform copy gained it in its Journey 501) ─────────────────────────
+
+def test_apply_pins_rewrites_only_the_floating_image_lines_and_keeps_everything_else():
+    text = "services:\n  a:\n    image: prom/prometheus:latest   # metrics\n    restart: always\n  b:\n    image: grafana/grafana:12.1.1\n"
+    new, done = pin.apply_pins(text, {"prom/prometheus:latest": "prom/prometheus@sha256:abc"})
+    assert done == ["prom/prometheus:latest"]
+    assert "image: prom/prometheus@sha256:abc   # metrics" in new and "image: grafana/grafana:12.1.1" in new and "restart: always" in new
+    assert new.replace("prom/prometheus@sha256:abc", "prom/prometheus:latest") == text
+
+
+def test_write_pins_the_running_digest_into_the_file_and_keeps_a_backup():
+    import tempfile
+    d = tempfile.mkdtemp()
+    compose = os.path.join(d, "docker-compose.yml")
+    open(compose, "w").write("services:\n  p:\n    image: prom/prometheus:latest\n    container_name: p\n  g:\n    image: grafana/grafana:12.1.1\n")
+    with mock.patch.object(pin, "running_digest", return_value="prom/prometheus@sha256:feedbeef"):
+        assert pin.main(["x", compose, "--write"]) == 0
+    text = open(compose).read()
+    assert "image: prom/prometheus@sha256:feedbeef" in text and "image: grafana/grafana:12.1.1" in text
+    assert "image: prom/prometheus:latest" in open(compose + ".bak").read()
+
+
+def test_the_two_copies_of_the_script_stay_identical_apart_from_their_header():
+    """Keep the two copies identical (the docstring says so): this repo's copy must carry the --write that the platform's has."""
+    src = open(os.path.join(_ROOT, "scripts", "pin_image_digests.py")).read()
+    assert "def apply_pins(" in src and '"--write" in argv' in src
 
 if __name__ == "__main__":
     import traceback

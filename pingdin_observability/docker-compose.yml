@@ -27,7 +27,7 @@ x-logging: &bounded-logs
 
 services:
   pingdin-obs-prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
     container_name: pingdin-obs-prometheus
     logging: *bounded-logs
     restart: unless-stopped
@@ -60,7 +60,7 @@ services:
       retries: 5
 
   pingdin-obs-alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d
     container_name: pingdin-obs-alertmanager
     logging: *bounded-logs
     restart: unless-stopped
@@ -113,7 +113,7 @@ services:
       - "${TAILSCALE_IP}:8090:8090"
 
   pingdin-obs-loki:
-    image: grafana/loki:latest
+    image: grafana/loki@sha256:efd47c67f9bac88ca29bcf8cb997d9ab29d1848bd0aff579282295542a745952
     container_name: pingdin-obs-loki
     logging: *bounded-logs
     restart: unless-stopped
@@ -133,7 +133,7 @@ services:
     # image happens to ship.
 
   pingdin-obs-tempo:
-    image: grafana/tempo:latest
+    image: grafana/tempo@sha256:1ce31d6d7ffab62189685e8c47881d4a561c5d38bd0dbd66e40ca83cef07923d
     container_name: pingdin-obs-tempo
     logging: *bounded-logs
     restart: unless-stopped
@@ -212,7 +212,7 @@ services:
 
   # ── Self-monitoring: this droplet watching its own health ──────────
   pingdin-obs-node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
     container_name: pingdin-obs-node-exporter
     logging: *bounded-logs
     restart: unless-stopped
@@ -230,7 +230,7 @@ services:
       - pingdin-observability-net
 
   pingdin-obs-cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor@sha256:3de2bd5203120b866d74a9b283b2ffb8ec382fbf9dc321814700c6ea6f44ec57
     container_name: pingdin-obs-cadvisor
     logging: *bounded-logs
     restart: unless-stopped
@@ -253,7 +253,7 @@ services:
   # alerts on it — independent of what tools the image ships. Floating tag like
   # its siblings; scripts/pin_image_digests.py freezes it with the rest.
   pingdin-obs-blackbox:
-    image: prom/blackbox-exporter:latest
+    image: prom/blackbox-exporter@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
     container_name: pingdin-obs-blackbox
     logging: *bounded-logs
     restart: unless-stopped

@@ -33,7 +33,7 @@ impossible, not just contractually promised.
 
 ## What DOES work identically across every tier, today
 
-- Container-level metrics (CPU/memory/disk, Postgres/Redis health) —
+- Container-level metrics (CPU/memory/disk, Postgres health) —
   pseudonymous by nature, no tenant data in a `node_cpu_seconds_total`
   metric.
 - Application-level traces (shipped: `pingdin_platform`'s `shared/otel.py`,
@@ -144,7 +144,7 @@ ahead of a confirmed consumer). When one does:
 
 | Signal | Managed tenant | Sovereign-A | Sovereign-B |
 |---|---|---|---|
-| Infra metrics (Postgres/Redis/CPU/mem) | Central Grafana | Not shipped yet (Phase D) | Not shipped yet (Phase D) |
+| Infra metrics (Postgres/CPU/mem) | Central Grafana | Not shipped yet (Phase D) | Not shipped yet (Phase D) |
 | App traces (once Phase C ships) | Central Grafana | Not shipped yet (Phase D) | Not shipped yet (Phase D) |
 | Container logs | Central Grafana | Not shipped yet (Phase D) | Not shipped yet (Phase D) |
 | Raw business data ("reshow what happened") | Central Grafana, read-only, `pingdin_grafana_ro` | Never centrally — local only, if/when built | Never centrally — local only, if/when built |

@@ -43,9 +43,9 @@ receivers:
 # incident, since group_by alertname puts each in its own group. While
 # MainDropletHostDown is firing, its four absent()-based dependents are
 # suppressed. No `equal:` labels: these alerts share no label, and the
-# relationship is platform-wide, not per-instance. Postgres/Redis "down" rules
-# (`== 0`, no absent()) are deliberately not listed: they cannot fire when the
-# host is gone, and if one ever fires alongside a live host it is a real,
+# relationship is platform-wide, not per-instance. The Postgres "down" rule
+# (`== 0`, no absent()) is deliberately not listed: it cannot fire when the
+# host is gone, and if it ever fires alongside a live host it is a real,
 # separate problem that must not be hidden.
 inhibit_rules:
   - source_matchers:

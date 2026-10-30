@@ -61,13 +61,15 @@ def _rules(unhealthy=(), unknown=()):
 
 
 def _run(*, stale=False, dry_run="ok", unhealthy=(), bad_rules=(), rules_raw="default", dotenv="TAILSCALE_IP=100.92.158.102\nOWNER_ALERT_WEBHOOK_TOKEN=tok-secret-123\n",
-         curl_rc=0, env_extra=None, grafana_files=3):
+         curl_rc=0, env_extra=None, grafana_files=3, compose=None):
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "scripts"))
         for s in ("ops_daily_check.sh", "find_stale_containers.sh"):
             shutil.copy(os.path.join(_ROOT, "scripts", s), os.path.join(d, "scripts", s))
         if dotenv is not None:
             open(os.path.join(d, ".env"), "w").write(dotenv)
+        if compose is not None:   # Obs journey 31 (section 6): the images the compose file names
+            open(os.path.join(d, "docker-compose.yml"), "w").write(compose)
         dash = os.path.join(d, "grafana", "provisioning", "dashboards", "json")
         os.makedirs(dash)
         for n in ("a", "b", "c"):
@@ -237,3 +239,14 @@ if __name__ == "__main__":
             print(f"FAILED: {t.__name__}")
             traceback.print_exc()
     print(f"{passed} passed, {failed} failed (of {len(tests)})")
+
+
+def test_an_image_on_a_floating_tag_is_a_problem_and_a_digest_or_fixed_tag_is_not():
+    """Obs journey 31."""
+    pinned = "services:\n  a:\n    image: prom/prometheus@sha256:" + "a" * 64 + "\n  g:\n    image: grafana/grafana:12.1.1\n  b:\n    build: .\n"
+    r, _ = _run(compose=pinned)
+    assert r.returncode == 0, r.stdout + r.stderr
+    r, calls = _run(compose=pinned + "  l:\n    image: grafana/loki:latest   # logs\n  t:\n    image: grafana/tempo\n")
+    assert r.returncode == 1 and "grafana/loki:latest" in r.stdout and "grafana/tempo" in r.stdout and "pin_image_digests.py --write" in r.stdout
+    assert "grafana/grafana" not in r.stdout.split("floating tag")[1].split("pin them")[0]
+    assert _run(compose=pinned + "  l:\n    image: grafana/loki:latest\n", env_extra={"OPS_CHECK_SKIP_PINS": "1"})[0].returncode == 0

@@ -93,6 +93,14 @@ docker compose up -d --force-recreate pingdin-obs-grafana
 `docker compose` lines: a sync leaves bind-mounted services (Grafana, Prometheus, Alertmanager …) looking at stale files (and a delete-and-copy leaves them looking at deleted directories),
 and `deploy.sh` is what fixes that every time (see `ROUTINE_CHECKS.md`, "Deploying a change").
 
+### Pinning the images (Journey 31)
+Every image but Grafana used to float on `:latest`, so a restart could pull a different build with no change here. Pin each to the exact build running now
+(this changes nothing that runs): on this server `cd /opt/pingdin_observability && python3 scripts/pin_image_digests.py --write` → `N image(s) pinned`
+(a `docker-compose.yml.bak` is kept), `docker compose config -q`, `docker compose up -d` (nothing restarts). Then copy the file back to the laptop and
+commit it: `scp duthink@142.93.209.14:/opt/pingdin_observability/docker-compose.yml pingdin_observability/docker-compose.yml`. A later deploy that sent
+the old file would un-pin them, which is why the copy-back matters. The daily check (section 6) reports any image still on a floating tag. To move an image
+on purpose: put its tag back, `docker compose pull <service>`, `docker compose up -d <service>`, check, then pin again.
+
 ## Part 5 — Verify, don't assume
 
 1. **Metrics**: open Grafana (see Part 6), the "Host & Container
@@ -129,7 +137,7 @@ and `deploy.sh` is what fixes that every time (see `ROUTINE_CHECKS.md`, "Deployi
    `up` instead (Graph, or
    `curl -sG http://$TS:9090/api/v1/query --data-urlencode 'query=up'`):
    expect one series per job, all `1` — `pingdin-edge`, `pingdin-core`,
-   `pingdin-compute`, `node`, `cadvisor`, `postgres`, `redis` from
+   `pingdin-compute`, `node`, `cadvisor`, `postgres` from
    the main droplet, plus `prometheus`, `obs-node`, `obs-cadvisor` here.
    Two series for one job name means a local job collides with a relayed
    one (Journey 7). `http_requests_total`/

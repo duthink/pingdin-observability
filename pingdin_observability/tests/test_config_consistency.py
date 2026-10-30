@@ -556,7 +556,7 @@ def test_the_dashboard_outside_view_reads_the_probe_metrics():
 # Jobs the main droplet's pingdin-alloy-edge relays (source of truth: pingdin_platform's
 # alloy-edge/config.alloy — this repo cannot import it). Adding one here is a deliberate
 # act; the point of the test below is that a MISSPELT job in a rule fails the build.
-_RELAYED_JOBS = {"node", "cadvisor", "postgres", "redis", "pingdin-edge", "pingdin-core", "pingdin-compute"}
+_RELAYED_JOBS = {"node", "cadvisor", "postgres", "pingdin-edge", "pingdin-core", "pingdin-compute"}   # "redis" gone with Redis (Obs journey 31, platform Journey 545)
 
 
 def test_every_job_named_in_a_rule_or_panel_is_a_job_that_exists():

@@ -66,14 +66,6 @@
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "targets": [{ "expr": "pg_up" }],
       "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] } }, "overrides": [] }
-    },
-    {
-      "type": "stat",
-      "title": "Redis up",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "targets": [{ "expr": "redis_up" }],
-      "fieldConfig": { "defaults": { "thresholds": { "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] } }, "overrides": [] }
     }
   ]
 }

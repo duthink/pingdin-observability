@@ -18,6 +18,7 @@
 #                              started leaves the container looking at the old, deleted one: Grafana logs
 #                              "no such file or directory" every 30 s and silently stops applying every dashboard
 #                              change (BUILD_LOG Journey 18 — the Journey 14/15/17 dashboards never appeared)
+#   6. every image pinned      no image on a floating tag (:latest ...): pin with scripts/pin_image_digests.py --write (Obs journey 31)
 #
 # Install (server local time):
 #   crontab -e  →  20 6 * * * cd /opt/pingdin_observability && bash scripts/ops_daily_check.sh >> ops-check.log 2>&1
@@ -95,6 +96,15 @@ if [ "${host_n:-0}" -gt 0 ]; then
   if [ "${ctr_n:-0}" != "$host_n" ]; then
     add_problem "Grafana's view of its provisioned dashboards has ${ctr_n:-0} file(s) but the repo has ${host_n} — its bind mount is stale (the host directory was replaced after the container started), so dashboard changes are NOT being applied. Usual cause: the repo's directories were deleted and re-copied (e.g. sudo rm -rf before a sync) — scripts/sync_to_server.sh never deletes, so use it. Fix: docker compose up -d --force-recreate pingdin-obs-grafana"
   fi
+fi
+
+# 6. every image pinned (Obs journey 31) -----------------------------------------------
+# An image on a floating tag (:latest, :main ...) can change under a restart with no change here: Grafana's :latest once moved onto a real regression.
+# `python3 scripts/pin_image_digests.py --write` pins each to the exact build running now (it changes nothing that runs); then copy the file back to the
+# laptop and commit it. OPS_CHECK_SKIP_PINS=1 switches this off.
+if [ "${OPS_CHECK_SKIP_PINS:-0}" != "1" ] && [ -f docker-compose.yml ]; then
+  floating="$(grep -E '^[[:space:]]+image:[[:space:]]+[^#[:space:]]+' docker-compose.yml | grep -vE '@sha256:' | grep -E ':(latest|main|main-stable|edge|nightly)([[:space:]]|$)|image:[[:space:]]+[^:@[:space:]]+([[:space:]]|$)' | sed -E 's/^[[:space:]]*image:[[:space:]]*//; s/[[:space:]].*//' | tr '\n' ' ')"
+  [ -n "$floating" ] && add_problem "image(s) on a floating tag, which can change under a restart: ${floating}— pin them to what runs now: python3 scripts/pin_image_digests.py --write, then copy docker-compose.yml back to the laptop and commit it (docs/DEPLOYMENT_RUNBOOK.md, Obs journey 31)"
 fi
 
 # report -------------------------------------------------------------------------------

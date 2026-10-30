@@ -4,10 +4,11 @@ scripts/pin_image_digests.py — BUILD_LOG Journey 377 (pingdin_platform);
 copied VERBATIM into pingdin_observability (its BUILD_LOG Journey 8) because
 the two repos deploy independently to different servers and this repo is
 deliberately self-contained. Keep the two copies identical: a fix to one is a
-fix to both.
+fix to both. (Obs journey 31 brought this copy level again: the platform's
+Journey 501 had added --write to its copy only.)
 
 Real gap found while auditing the observability layer: `docker-compose.yml`
-pins `postgres`, `redis`, and `caddy` to a fixed major version, but
+pins `postgres`, `redis`, and `caddy` to a fixed major version, but n8n,
 Alloy, and every metrics exporter (postgres-exporter, redis-exporter,
 cadvisor, node-exporter) still float on `:latest` — and
 `deployment-templates/docker-compose.sovereign-{a,b}.yml` carry the same
@@ -23,7 +24,8 @@ change behavior (it's the exact bits already live), and it stops a future
 the same floating tag.
 
 USAGE (on the deploy server, after `docker compose up -d`):
-    python3 scripts/pin_image_digests.py [path/to/docker-compose.yml]
+    python3 scripts/pin_image_digests.py [path/to/docker-compose.yml]          # print the replacement lines
+    python3 scripts/pin_image_digests.py [path/to/docker-compose.yml] --write  # rewrite the file in place (keeps a .bak), BUILD_LOG Journey 501
 
 Reads the compose file's own `services:` block (no hardcoded service or
 image list — this repo's own standing "config/registry-driven, no
@@ -94,7 +96,26 @@ def running_digest(container_name: str) -> str | None:
         return None
 
 
+def apply_pins(text: str, pins: dict[str, str]) -> tuple[str, list[str]]:
+    """Rewrite `image: <floating>` lines in compose TEXT to `image: <repo@sha256:...>` for every (image -> digest) in `pins`, keeping every comment
+    and every other line exactly as it was. An image that appears on more than one line is rewritten on all of them (the same digest is right for
+    each). Returns (new text, the images that were rewritten). Pure: no file, no Docker."""
+    done: list[str] = []
+    out = []
+    for line in text.split("\n"):
+        m = re.match(r"^(\s*image:\s*)(\S+)(\s*(#.*)?)$", line)
+        if m and m.group(2) in pins:
+            out.append(f"{m.group(1)}{pins[m.group(2)]}{m.group(3)}")
+            if m.group(2) not in done:
+                done.append(m.group(2))
+        else:
+            out.append(line)
+    return "\n".join(out), done
+
+
 def main(argv: list[str]) -> int:
+    write = "--write" in argv
+    argv = [a for a in argv if a != "--write"]
     compose_path = argv[1] if len(argv) > 1 else "docker-compose.yml"
     try:
         services = load_services(compose_path)
@@ -113,6 +134,7 @@ def main(argv: list[str]) -> int:
 
     any_floating = False
     any_unreachable = False
+    pins: dict[str, str] = {}
     for name, svc in sorted(services.items()):
         image = svc.get("image")
         if not image:
@@ -124,6 +146,7 @@ def main(argv: list[str]) -> int:
         container = svc.get("container_name", name)
         digest = running_digest(container)
         if digest:
+            pins[image] = digest
             print(f"# {name} (currently {image})")
             print(f"  image: {digest}\n")
         else:
@@ -136,6 +159,19 @@ def main(argv: list[str]) -> int:
     elif any_unreachable:
         print("Some services above need the stack running (`docker compose up -d`)"
               " and this script run ON the deploy server, not elsewhere.")
+    if write:
+        if not pins:
+            print("--write: nothing to write (no running digest was found).")
+            return 0
+        with open(compose_path, encoding="utf-8") as f:
+            original = f.read()
+        updated, done = apply_pins(original, pins)
+        with open(compose_path + ".bak", "w", encoding="utf-8") as f:
+            f.write(original)
+        with open(compose_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+        print(f"--write: {len(done)} image(s) pinned in {compose_path} (the old file is {compose_path}.bak): {', '.join(done)}")
+        print("Next: `docker compose config -q` must print nothing, then deploy as usual. What is running does not change.")
     return 0
 
 

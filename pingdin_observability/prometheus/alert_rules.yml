@@ -119,14 +119,6 @@ groups:
         annotations:
           summary: "pingdin-db is not responding to postgres_exporter"
 
-      - alert: RedisDown
-        expr: redis_up == 0
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "pingdin-redis is not responding to redis_exporter"
-
   - name: pingdin-app
     # BUILD_LOG Journey 214 — direct instruction: "app-level alerting"
     # was a real, named gap this whole file had until now — every
@@ -134,7 +126,7 @@ groups:
     # possible once pingdin_platform's own shared/metrics.py (same
     # Journey) mounted a genuine Prometheus /metrics endpoint on each
     # of pingdin-edge/-core/-compute, scraped via alloy-edge's own
-    # config.alloy (same relay path node/postgres/redis already
+    # config.alloy (same relay path node/postgres already
     # use) — before that, Prometheus had no direct signal about these
     # three services at all, only Tempo's own trace data.
     rules:

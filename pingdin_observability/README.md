@@ -36,7 +36,7 @@ traces on the main droplet and ships them here, over Tailscale, to this
 droplet's Prometheus/Loki/Tempo. Traces come from
 `pingdin-edge`/`-core`/`-compute` (`shared/otel.py`, one trace across all
 three; n8n, which used to start them, was removed in platform Journey 484); metrics from those three services (`shared/metrics.py`) plus the
-Postgres/Redis/node/cAdvisor exporters; logs from every container, labelled by
+Postgres/node/cAdvisor exporters; logs from every container, labelled by
 container name. Grafana visualizes all three signal types, correlated (a
 trace_id in a log line jumps to its full trace; a trace jumps to matching
 logs), plus a fourth, business-data view for Managed tenants only — a direct,

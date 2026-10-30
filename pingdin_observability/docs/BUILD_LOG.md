@@ -1827,3 +1827,25 @@ No `.env` change.
 
 ### What to check — Journey 30
 Step 3's inspect line shows `10m` for all 9 containers; Grafana and the alerts work as before (the daily check stays green; the Watchdog heartbeat keeps arriving).
+
+## Journey 31 — Redis gone, the images pinned, the pin script level with the platform's (pairs with pingdin_platform Journey 545) (28 Oct 2026)
+
+The platform's CTO plan (its Journeys 540 to 545) removes Redis, which no code ever used, and pins the observability images. On this side:
+
+**Changed.**
+1. **Redis.** The `RedisDown` alert (`prometheus/alert_rules.yml`), the "Redis up" panel (`host-resources` dashboard) and `redis` among the jobs the main droplet relays (`tests/test_config_consistency.py`) are removed; comments and docs follow (alertmanager's inhibit note, README, ROUTINE_CHECKS: 26 rules, 14 `up` lines; DEPLOYMENT_RUNBOOK; SOVEREIGN_OBSERVABILITY).
+2. **The pin script.** This copy of `scripts/pin_image_digests.py` had lost `--write` (rewrite the compose file in place, keeping a `.bak`), which the platform's copy gained in its Journey 501; its header says to keep the copies identical. They are level again (only the header differs).
+3. **Floating images are reported.** `scripts/ops_daily_check.sh` section 6: any image on `:latest`, `:main`, `:main-stable`, `:edge`, `:nightly` or with no tag is a problem, with the fix (`OPS_CHECK_SKIP_PINS=1` switches it off). The pin itself is done on the server (below), because only the server knows which build is running.
+
+**Tests.** `test_pin_image_digests` (+3: `apply_pins` rewrites only the floating lines and keeps comments; `--write` pins the running digest and keeps a backup; the copy carries `--write`; the compose classification accepts the images as floating or as digests), `test_ops_daily_check` (+1: a floating tag is reported, a digest or fixed tag is not, the switch-off works); the routine-check counts follow.
+
+**Honest limits.** Until the pin step runs, the daily check reports the floating images every day: that is intended (do the step with this deploy). A digest-pinned image no longer receives security fixes by itself: moving one is deliberate (DEPLOYMENT_RUNBOOK, "Pinning the images").
+
+### Verification — Journey 31
+118 passed (114 + 4).
+
+### Deployment — Journey 31
+In pingdin_platform Journey 545's Deployment, step 10: commit and push "Obs journey 31: Redis gone, image pins, pin script level"; `bash pingdin_observability/scripts/sync_to_server.sh --deploy` → `DEPLOY OK`; on this server `python3 scripts/pin_image_digests.py --write`, `docker compose config -q`, `docker compose up -d`, `bash scripts/ops_daily_check.sh` → `OK`; then copy `docker-compose.yml` back to the laptop, commit "Obs journey 31: images pinned, as deployed" and push.
+
+### What to check — Journey 31
+Prometheus `up` shows 14 lines and no `redis` job (ROUTINE_CHECKS); `grep -c ':latest' docker-compose.yml` → `0`; the daily check has no `floating tag` line.
